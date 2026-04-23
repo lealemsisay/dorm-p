@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useData } from '@/contexts/DataContext';
-import { DoorOpen, ChevronDown, ChevronRight, Users } from 'lucide-react';
+import { DoorOpen, ChevronDown, ChevronRight, Users, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Tabs,
@@ -8,6 +8,16 @@ import {
   TabsList,
   TabsTrigger,
 } from '@/components/ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const Allocations = () => {
   const { blocks, rooms, allocations, students, allocateStudent, deallocateStudent } = useData();
@@ -15,6 +25,20 @@ const Allocations = () => {
   const [expandedRooms, setExpandedRooms] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<Record<string, string>>({});
+
+  // For assign from Occupants tab
+  const [assignStudentId, setAssignStudentId] = useState('');
+  const [assignRoomId, setAssignRoomId] = useState('');
+
+  // Category override state
+  const [overrideDialog, setOverrideDialog] = useState<{
+    open: boolean;
+    studentId: string;
+    roomId: string;
+    blockId: string;
+    targetCategory: string;
+    existingCategory: string;
+  } | null>(null);
 
   const getAllocationByRoom = (roomId: string) => allocations.find(a => a.roomId === roomId);
   const getStudent = (userId: string | null) => userId ? students.find(s => s.id === userId) : undefined;
@@ -56,19 +80,64 @@ const Allocations = () => {
     );
   };
 
+  const getRoomCategory = (roomId: string): string | null => {
+    const room = rooms.find(r => r.id === roomId);
+    if (!room || room.occupants.length === 0) return null;
+    const occupant = students.find(s => s.id === room.occupants[0]);
+    return occupant?.category || null;
+  };
+
+  const executeAssign = (studentId: string, roomId: string, blockId: string): boolean => {
+    const error = allocateStudent(studentId, blockId, roomId);
+    if (error) {
+      toast.error(error);
+      return false;
+    }
+    setSelectedStudent(prev => ({ ...prev, [roomId]: '' }));
+    // Clear assign form if in occupants tab
+    setAssignStudentId('');
+    setAssignRoomId('');
+    toast.success('Student assigned to room successfully');
+    return true;
+  };
+
+  const attemptAssign = (studentId: string, roomId: string, blockId: string) => {
+    const student = students.find(s => s.id === studentId);
+    if (!student) {
+      toast.error('Student not found');
+      return false;
+    }
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) {
+      toast.error('Room not found');
+      return false;
+    }
+    if (room.occupants.length >= room.capacity) {
+      toast.error('Room is full');
+      return false;
+    }
+    const existingCategory = getRoomCategory(roomId);
+    if (existingCategory && student.category !== existingCategory) {
+      setOverrideDialog({
+        open: true,
+        studentId,
+        roomId,
+        blockId,
+        targetCategory: student.category || 'Unknown',
+        existingCategory: existingCategory,
+      });
+      return false;
+    }
+    return executeAssign(studentId, roomId, blockId);
+  };
+
   const handleAssign = (roomId: string, blockId: string) => {
     const studentId = selectedStudent[roomId];
     if (!studentId) {
       toast.error('Select a student to assign');
       return;
     }
-    const error = allocateStudent(studentId, blockId, roomId);
-    if (error) {
-      toast.error(error);
-      return;
-    }
-    setSelectedStudent(prev => ({ ...prev, [roomId]: '' }));
-    toast.success('Student assigned to room successfully');
+    attemptAssign(studentId, roomId, blockId);
   };
 
   const handleDeallocate = (studentId: string) => {
@@ -85,6 +154,26 @@ const Allocations = () => {
     const visibleRooms = search.trim() ? blockRooms.filter(roomMatchesSearch) : blockRooms;
     return { block, rooms: visibleRooms };
   }).filter(item => item.rooms.length > 0);
+
+  const unassignedStudents = students.filter(s => !s.roomId);
+  const availableRooms = rooms.filter(r => r.occupants.length < r.capacity);
+
+  // For the "Assign from Occupants tab" button
+  const handleAssignFromOccupants = () => {
+    if (!assignStudentId) {
+      toast.error('Select a student');
+      return;
+    }
+    if (!assignRoomId) {
+      toast.error('Select a room');
+      return;
+    }
+    const room = rooms.find(r => r.id === assignRoomId);
+    if (!room) return;
+    const block = blocks.find(b => b.id === room.blockId);
+    if (!block) return;
+    attemptAssign(assignStudentId, assignRoomId, block.id);
+  };
 
   return (
     <div className="space-y-4">
@@ -142,7 +231,7 @@ const Allocations = () => {
                         const student = getStudent(userId);
                         const occupancyRate = (room.occupants.length / room.capacity) * 100;
                         const roomOpen = expandedRooms.includes(room.id);
-                        const unassignedStudents = students.filter(s => s.role === 'Student' && !s.roomId);
+                        const unassignedForBlock = unassignedStudents;
                         return (
                           <div key={room.id} className="rounded-xl border bg-background overflow-hidden">
                             <button
@@ -173,6 +262,11 @@ const Allocations = () => {
                                   <div className="text-sm text-muted-foreground">
                                     Room ID: <span className="font-medium text-card-foreground">{room.id}</span>
                                   </div>
+                                  {getRoomCategory(room.id) && (
+                                    <div className="text-sm text-muted-foreground">
+                                      Current category: <span className="font-medium text-card-foreground">{getRoomCategory(room.id)}</span>
+                                    </div>
+                                  )}
                                 </div>
 
                                 {status === 'Occupied' ? (
@@ -188,10 +282,6 @@ const Allocations = () => {
                                         <div>Category: <span className="font-medium text-card-foreground">{student.category ?? 'N/A'}</span></div>
                                         <div>Block: <span className="font-medium text-card-foreground">{block.name}</span></div>
                                         <div>Room: <span className="font-medium text-card-foreground">{room.roomNumber}</span></div>
-                                      </div>
-                                      <div className="grid gap-2 sm:grid-cols-2 text-sm text-muted-foreground">
-                                        <div>Room capacity: <span className="font-medium text-card-foreground">{room.capacity}</span></div>
-                                        <div>Occupants: <span className="font-medium text-card-foreground">{room.occupants.length}</span></div>
                                       </div>
                                       <button
                                         type="button"
@@ -229,9 +319,9 @@ const Allocations = () => {
                                         className="w-full px-3 py-2 rounded-lg border bg-background text-card-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                                       >
                                         <option value="">Select student</option>
-                                        {unassignedStudents.map(studentOption => (
+                                        {unassignedForBlock.map(studentOption => (
                                           <option key={studentOption.id} value={studentOption.id}>
-                                            {studentOption.name} ({studentOption.studentId})
+                                            {studentOption.name} ({studentOption.studentId}) - {studentOption.category || 'No category'}
                                           </option>
                                         ))}
                                       </select>
@@ -239,12 +329,12 @@ const Allocations = () => {
                                     <button
                                       type="button"
                                       onClick={() => handleAssign(room.id, block.id)}
-                                      disabled={unassignedStudents.length === 0}
+                                      disabled={unassignedForBlock.length === 0}
                                       className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-primary/40"
                                     >
                                       Assign to room
                                     </button>
-                                    {unassignedStudents.length === 0 && (
+                                    {unassignedForBlock.length === 0 && (
                                       <p className="text-sm text-muted-foreground">No unassigned students available.</p>
                                     )}
                                   </div>
@@ -265,6 +355,57 @@ const Allocations = () => {
         </TabsContent>
 
         <TabsContent value="occupants" className="space-y-4">
+          {/* Visible Assign Student Card */}
+          <div className="bg-card rounded-xl border shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <UserPlus className="w-5 h-5 text-primary" />
+              <h3 className="font-semibold text-card-foreground">Assign New Student</h3>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3 items-end">
+              <div>
+                <label className="block text-sm font-medium mb-1">Select Student</label>
+                <select
+                  value={assignStudentId}
+                  onChange={e => setAssignStudentId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border bg-background"
+                >
+                  <option value="">Choose student</option>
+                  {unassignedStudents.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.studentId}) - {s.category || 'No category'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Select Room</label>
+                <select
+                  value={assignRoomId}
+                  onChange={e => setAssignRoomId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border bg-background"
+                >
+                  <option value="">Choose room</option>
+                  {availableRooms.map(r => {
+                    const block = blocks.find(b => b.id === r.blockId);
+                    return (
+                      <option key={r.id} value={r.id}>
+                        {block?.name} - Room {r.roomNumber} ({r.occupants.length}/{r.capacity} beds)
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <button
+                onClick={handleAssignFromOccupants}
+                disabled={!assignStudentId || !assignRoomId}
+                className="bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50 font-medium"
+              >
+                Assign Student
+              </button>
+            </div>
+          </div>
+
+          {/* Existing allocated students table */}
           <div className="bg-card rounded-xl border shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -283,13 +424,11 @@ const Allocations = () => {
                 </thead>
                 <tbody>
                   {students.filter(s => {
-                    if (!s.roomId) return false; // Only allocated students
-                    if (!search.trim()) return true; // No search filter
-
+                    if (!s.roomId) return false;
+                    if (!search.trim()) return true;
                     const block = blocks.find(b => b.id === s.blockId);
                     const room = rooms.find(r => r.id === s.roomId);
                     const query = search.toLowerCase();
-
                     return (
                       s.name.toLowerCase().includes(query) ||
                       s.studentId.toLowerCase().includes(query) ||
@@ -318,9 +457,7 @@ const Allocations = () => {
                             {s.category ?? 'Unknown'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 hidden lg:table-cell">
-                          {s.batch ?? '—'}
-                        </td>
+                        <td className="px-4 py-3 hidden lg:table-cell">{s.batch ?? '—'}</td>
                         <td className="px-4 py-3">
                           {block ? (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-info/10 text-info">{block.name}</span>
@@ -354,33 +491,39 @@ const Allocations = () => {
                   <p className="text-muted-foreground">No students are currently allocated to rooms.</p>
                 </div>
               )}
-              {students.filter(s => s.roomId).length > 0 && students.filter(s => {
-                if (!s.roomId) return false;
-                if (!search.trim()) return true;
-
-                const block = blocks.find(b => b.id === s.blockId);
-                const room = rooms.find(r => r.id === s.roomId);
-                const query = search.toLowerCase();
-
-                return (
-                  s.name.toLowerCase().includes(query) ||
-                  s.studentId.toLowerCase().includes(query) ||
-                  s.phone.includes(query) ||
-                  s.gender.toLowerCase().includes(query) ||
-                  (s.batch?.toLowerCase().includes(query) ?? false) ||
-                  (s.category?.toLowerCase().includes(query) ?? false) ||
-                  (block?.name.toLowerCase().includes(query) ?? false) ||
-                  (room?.roomNumber.toString().includes(query) ?? false)
-                );
-              }).length === 0 && (
-                <div className="p-8 text-center">
-                  <p className="text-muted-foreground">No occupants match your search.</p>
-                </div>
-              )}
             </div>
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Category mismatch confirmation dialog */}
+      <AlertDialog open={overrideDialog?.open || false} onOpenChange={(open) => !open && setOverrideDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Category mismatch</AlertDialogTitle>
+            <AlertDialogDescription>
+              The student you are trying to assign has category <strong>{overrideDialog?.targetCategory}</strong>.<br />
+              The room currently contains students from category <strong>{overrideDialog?.existingCategory}</strong>.<br /><br />
+              Assigning a student from a different category may cause issues with room management.<br />
+              Are you sure you want to continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (overrideDialog) {
+                  executeAssign(overrideDialog.studentId, overrideDialog.roomId, overrideDialog.blockId);
+                  setOverrideDialog(null);
+                }
+              }}
+              className="bg-warning text-warning-foreground"
+            >
+              Yes, assign anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Plus, Trash2, Building, Edit, Eye, Search } from 'lucide-react';
 import DormModal from '@/components/dorm/DormModal';
 import type { Block, Room } from '@/data/rooms';
+import type { Student } from '@/data/students';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,7 +18,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const Rooms = () => {
-  const { blocks, rooms, addBlock, updateBlock, deleteBlock, addRoom, updateRoom, deleteRoom } = useData();
+  const { blocks, rooms, students, addBlock, updateBlock, deleteBlock, addRoom, updateRoom, deleteRoom } = useData();
   const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [roomModalOpen, setRoomModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<Block | null>(null);
@@ -26,6 +27,9 @@ const Rooms = () => {
   const [blockForm, setBlockForm] = useState({ name: '', numberOfRooms: 3 });
   const [roomForm, setRoomForm] = useState({ blockId: '', roomNumber: '', capacity: 2 });
   const [blockSearch, setBlockSearch] = useState('');
+  
+  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [studentModalOpen, setStudentModalOpen] = useState(false);
 
   const filteredBlocks = blocks.filter(b =>
     b.name.toLowerCase().includes(blockSearch.toLowerCase())
@@ -99,6 +103,16 @@ const Rooms = () => {
 
   const openBlockDetails = (blockId: string) => {
     setSelectedBlock(selectedBlock === blockId ? null : blockId);
+  };
+
+  const handleRoomClick = (room: Room) => {
+    setSelectedRoom(room);
+    setStudentModalOpen(true);
+  };
+
+  const getAssignedStudents = (room: Room | null): Student[] => {
+    if (!room) return [];
+    return students.filter(s => room.occupants.includes(s.id));
   };
 
   return (
@@ -199,8 +213,12 @@ const Rooms = () => {
                         const isFull = r.occupants.length >= r.capacity;
                         const isEmpty = r.occupants.length === 0;
                         return (
-                          <div key={r.id} className="flex items-center justify-between py-3 px-4 bg-background rounded-lg border">
-                            <div className="flex items-center gap-4">
+                          <div
+                            key={r.id}
+                            className="flex items-center justify-between py-3 px-4 bg-background rounded-lg border cursor-pointer hover:bg-muted/50 transition-colors"
+                            onClick={() => handleRoomClick(r)}
+                          >
+                            <div className="flex items-center gap-4 flex-1">
                               <div>
                                 <p className="font-medium text-card-foreground">Room {r.roomNumber}</p>
                                 <p className="text-sm text-muted-foreground">{r.occupants.length} / {r.capacity} beds</p>
@@ -219,16 +237,19 @@ const Rooms = () => {
                                 {isFull ? 'Full' : isEmpty ? 'Available' : 'Partial'}
                               </span>
                             </div>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                               <button
-                                onClick={() => openRoomEdit(r)}
+                                onClick={(e) => { e.stopPropagation(); openRoomEdit(r); }}
                                 className="p-1.5 rounded-md hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
                               >
                                 <Edit className="w-4 h-4" />
                               </button>
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
-                                  <button className="p-1.5 rounded-md hover:bg-destructive/10 transition-colors text-muted-foreground hover:text-destructive">
+                                  <button
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="p-1.5 rounded-md hover:bg-destructive/10 transition-colors text-muted-foreground hover:text-destructive"
+                                  >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                 </AlertDialogTrigger>
@@ -272,6 +293,65 @@ const Rooms = () => {
         )}
       </div>
 
+      {/* Student modal - wider, no backdrop close */}
+      <DormModal
+        isOpen={studentModalOpen}
+        onClose={() => setStudentModalOpen(false)}
+        title={`Room ${selectedRoom?.roomNumber || ''} - Assigned Students`}
+        disableBackdropClose={true}
+      >
+        <div className="max-h-[70vh] overflow-y-auto">
+          {selectedRoom && (
+            <>
+              <div className="mb-4 text-sm text-muted-foreground p-2 bg-muted/20 rounded">
+                <p><strong>Block:</strong> {blocks.find(b => b.id === selectedRoom.blockId)?.name || 'Unknown'} &nbsp;|&nbsp;
+                <strong>Capacity:</strong> {selectedRoom.capacity} &nbsp;|&nbsp;
+                <strong>Occupied:</strong> {selectedRoom.occupants.length}</p>
+              </div>
+              {getAssignedStudents(selectedRoom).length === 0 ? (
+                <p className="text-center text-muted-foreground py-6">No students assigned to this room.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 border-b">
+                      <tr>
+                        <th className="text-left px-4 py-3">Name</th>
+                        <th className="text-left px-4 py-3">Student ID</th>
+                        <th className="text-left px-4 py-3 hidden sm:table-cell">Phone</th>
+                        <th className="text-left px-4 py-3 hidden md:table-cell">Gender</th>
+                        <th className="text-left px-4 py-3 hidden md:table-cell">Category</th>
+                        <th className="text-left px-4 py-3 hidden lg:table-cell">Batch</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {getAssignedStudents(selectedRoom).map(student => (
+                        <tr key={student.id} className="border-b hover:bg-muted/30">
+                          <td className="px-4 py-3 font-medium">{student.name}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{student.studentId}</td>
+                          <td className="px-4 py-3 hidden sm:table-cell">{student.phone}</td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${student.gender === 'Male' ? 'bg-primary/10 text-primary' : 'bg-accent text-accent-foreground'}`}>
+                              {student.gender}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-secondary/10 text-secondary">
+                              {student.category ?? '—'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 hidden lg:table-cell">{student.batch ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </DormModal>
+
+      {/* Add/Edit Block Modal */}
       <DormModal isOpen={blockModalOpen} onClose={() => { setBlockModalOpen(false); setEditingBlock(null); setBlockForm({ name: '', numberOfRooms: 3 }); }} title={editingBlock ? 'Edit Block' : 'Add Block'}>
         <form onSubmit={handleBlockSubmit} className="space-y-4">
           <div>
@@ -293,6 +373,7 @@ const Rooms = () => {
         </form>
       </DormModal>
 
+      {/* Add/Edit Room Modal */}
       <DormModal isOpen={roomModalOpen} onClose={() => { setRoomModalOpen(false); setEditingRoom(null); setRoomForm({ blockId: '', roomNumber: '', capacity: 2 }); }} title={editingRoom ? 'Edit Room' : 'Add Room'}>
         <form onSubmit={handleRoomSubmit} className="space-y-4">
           <div>

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { toast } from 'sonner';
-import { Plus, Trash2, Building, Edit, Eye, Search } from 'lucide-react';
+import { Plus, Trash2, Building, Edit, Eye, Search, Power, PowerOff } from 'lucide-react';
 import DormModal from '@/components/dorm/DormModal';
 import type { Block, Room } from '@/data/rooms';
 import type { Student } from '@/data/students';
@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const Rooms = () => {
-  const { blocks, rooms, students, addBlock, updateBlock, deleteBlock, addRoom, updateRoom, deleteRoom } = useData();
+  const { blocks, rooms, students, addBlock, updateBlock, deleteBlock, addRoom, updateRoom, deleteRoom, deactivateRoom, deactivateBlock, reactivateRoom, reactivateBlock } = useData();
   const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [roomModalOpen, setRoomModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<Block | null>(null);
@@ -30,6 +30,13 @@ const Rooms = () => {
   
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [studentModalOpen, setStudentModalOpen] = useState(false);
+
+  // Deactivation dialogs
+  const [deactivateBlockDialog, setDeactivateBlockDialog] = useState(false);
+  const [deactivateRoomDialog, setDeactivateRoomDialog] = useState(false);
+  const [blockToDeactivate, setBlockToDeactivate] = useState<Block | null>(null);
+  const [roomToDeactivate, setRoomToDeactivate] = useState<Room | null>(null);
+  const [reassignBlockId, setReassignBlockId] = useState('');
 
   const filteredBlocks = blocks.filter(b =>
     b.name.toLowerCase().includes(blockSearch.toLowerCase())
@@ -91,6 +98,62 @@ const Rooms = () => {
     } else {
       toast.error('Cannot delete block with occupied rooms');
     }
+  };
+
+  const handleBlockReactivate = (block: Block) => {
+    const error = reactivateBlock(block.id);
+    if (error) {
+      toast.error(error);
+    } else {
+      toast.success(`Block ${block.name} reactivated`);
+    }
+  };
+
+  const handleBlockDeactivate = (block: Block) => {
+    setBlockToDeactivate(block);
+    setReassignBlockId('');
+    setDeactivateBlockDialog(true);
+  };
+
+  const handleRoomDeactivate = (room: Room) => {
+    setRoomToDeactivate(room);
+    setReassignBlockId('');
+    setDeactivateRoomDialog(true);
+  };
+
+  const handleRoomReactivate = (room: Room) => {
+    const error = reactivateRoom(room.id);
+    if (error) {
+      toast.error(error);
+    } else {
+      toast.success(`Room ${room.roomNumber} reactivated`);
+    }
+  };
+
+  const confirmBlockDeactivate = () => {
+    if (!blockToDeactivate) return;
+    const result = deactivateBlock(blockToDeactivate.id, reassignBlockId || undefined);
+    if (result.success) {
+      toast.success(`Block ${blockToDeactivate.name} deactivated`);
+    } else {
+      toast.error(`Cannot deactivate: ${result.errors.join(', ')}`);
+    }
+    setDeactivateBlockDialog(false);
+    setBlockToDeactivate(null);
+    setReassignBlockId('');
+  };
+
+  const confirmRoomDeactivate = () => {
+    if (!roomToDeactivate) return;
+    const result = deactivateRoom(roomToDeactivate.id, reassignBlockId || undefined);
+    if (result.success) {
+      toast.success(`Room ${roomToDeactivate.roomNumber} deactivated`);
+    } else {
+      toast.error(`Cannot deactivate: ${result.errors.join(', ')}`);
+    }
+    setDeactivateRoomDialog(false);
+    setRoomToDeactivate(null);
+    setReassignBlockId('');
   };
 
   const handleRoomDelete = (id: string, roomNumber: string) => {
@@ -164,6 +227,23 @@ const Rooms = () => {
                     >
                       <Edit className="w-4 h-4" />
                     </button>
+                    {block.active ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleBlockDeactivate(block); }}
+                        className="p-2 rounded-md hover:bg-orange-100 transition-colors text-muted-foreground hover:text-orange-600"
+                        title="Deactivate Block"
+                      >
+                        <PowerOff className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleBlockReactivate(block); }}
+                        className="p-2 rounded-md hover:bg-green-100 transition-colors text-muted-foreground hover:text-green-600"
+                        title="Reactivate Block"
+                      >
+                        <Power className="w-4 h-4" />
+                      </button>
+                    )}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <button
@@ -247,6 +327,23 @@ const Rooms = () => {
                               >
                                 <Edit className="w-4 h-4" />
                               </button>
+                              {r.active ? (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleRoomDeactivate(r); }}
+                                  className="p-1.5 rounded-md hover:bg-orange-100 transition-colors text-muted-foreground hover:text-orange-600"
+                                  title="Deactivate Room"
+                                >
+                                  <PowerOff className="w-4 h-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleRoomReactivate(r); }}
+                                  className="p-1.5 rounded-md hover:bg-green-100 transition-colors text-muted-foreground hover:text-green-600"
+                                  title="Reactivate Room"
+                                >
+                                  <Power className="w-4 h-4" />
+                                </button>
+                              )}
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
                                   <button
@@ -417,6 +514,86 @@ const Rooms = () => {
           </div>
         </form>
       </DormModal>
+
+      {/* Block Deactivation Dialog */}
+      <AlertDialog open={deactivateBlockDialog} onOpenChange={setDeactivateBlockDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate Block</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to deactivate block "{blockToDeactivate?.name}"?
+              {blockToDeactivate && (() => {
+                const occupiedRooms = rooms.filter(r => r.blockId === blockToDeactivate.id && allocations.some(a => a.roomId === r.id)).length;
+                return occupiedRooms > 0 ? ` This block has ${occupiedRooms} occupied room(s). Occupants will be reassigned.` : '';
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {blockToDeactivate && (() => {
+            const occupiedRooms = rooms.filter(r => r.blockId === blockToDeactivate.id && allocations.some(a => a.roomId === r.id)).length;
+            return occupiedRooms > 0 ? (
+              <div className="space-y-4">
+                <label className="block text-sm font-medium text-card-foreground">Reassign occupants to block:</label>
+                <select
+                  value={reassignBlockId}
+                  onChange={e => setReassignBlockId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  required
+                >
+                  <option value="">Select block for reassignment</option>
+                  {blocks.filter(b => b.id !== blockToDeactivate.id && b.active).map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : null;
+          })()}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setDeactivateBlockDialog(false); setBlockToDeactivate(null); setReassignBlockId(''); }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmBlockDeactivate} disabled={blockToDeactivate && rooms.filter(r => r.blockId === blockToDeactivate.id && allocations.some(a => a.roomId === r.id)).length > 0 && !reassignBlockId}>
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Room Deactivation Dialog */}
+      <AlertDialog open={deactivateRoomDialog} onOpenChange={setDeactivateRoomDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate Room</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to deactivate room "{roomToDeactivate?.roomNumber}"?
+              {roomToDeactivate && allocations.some(a => a.roomId === roomToDeactivate.id) ? ' This room is occupied. Occupants will be reassigned.' : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {roomToDeactivate && allocations.some(a => a.roomId === roomToDeactivate.id) && (
+            <div className="space-y-4">
+              <label className="block text-sm font-medium text-card-foreground">Reassign occupants to block:</label>
+              <select
+                value={reassignBlockId}
+                onChange={e => setReassignBlockId(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                required
+              >
+                <option value="">Select block for reassignment</option>
+                {blocks.filter(b => b.active).map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setDeactivateRoomDialog(false); setRoomToDeactivate(null); setReassignBlockId(''); }}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRoomDeactivate} disabled={roomToDeactivate && allocations.some(a => a.roomId === roomToDeactivate.id) && !reassignBlockId}>
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

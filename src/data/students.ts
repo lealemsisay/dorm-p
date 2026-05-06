@@ -8,6 +8,7 @@ export interface Student {
   registrar_id?: string;
   phone: string;
   gender: 'Male' | 'Female';
+  department?: string;
   category?: 'Freshman' | 'Senior' | 'Remedial' | 'GC';
   batch?: string;
   blockId?: string;

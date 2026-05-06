@@ -138,6 +138,153 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     return a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true });
   };
 
+  const normalizeDepartment = (department?: string) => department?.trim().toLowerCase() || 'zzzz';
+
+  const sortStudentsByAssignment = (a: Student, b: Student) => {
+    const departmentA = normalizeDepartment(a.department);
+    const departmentB = normalizeDepartment(b.department);
+    if (departmentA !== departmentB) return departmentA.localeCompare(departmentB);
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+  };
+
+  const buildAutoAssignableRooms = (gender: 'Male' | 'Female', defaultCapacity?: 4 | 5 | 6, roomSource: Room[] = rooms) => {
+    const genderBlockIds = new Set(
+      blocks
+        .filter(b => b.active && isGenderBlock(b.name, gender))
+        .map(b => b.id)
+    );
+
+    return roomSource
+      .filter(r => r.active && !r.reservedFor && genderBlockIds.has(r.blockId))
+      .sort((a, b) => {
+        const priorityA = defaultCapacity && a.capacity === defaultCapacity ? 0 : 1;
+        const priorityB = defaultCapacity && b.capacity === defaultCapacity ? 0 : 1;
+        if (priorityA !== priorityB) return priorityA - priorityB;
+        return compareRoomsForAutoAssign(a, b);
+      });
+  };
+
+  const assignStudentToRoom = (
+    student: Student,
+    room: Room,
+    nextStudents: Student[],
+    nextRooms: Room[],
+    nextAllocations: Allocation[]
+  ) => {
+    const roomIndex = nextRooms.findIndex(r => r.id === room.id);
+    if (roomIndex < 0) return false;
+
+    nextRooms[roomIndex].occupants = [...nextRooms[roomIndex].occupants, student.id];
+
+    const studentIndex = nextStudents.findIndex(s => s.id === student.id);
+    if (studentIndex < 0) return false;
+
+    nextStudents[studentIndex] = {
+      ...nextStudents[studentIndex],
+      blockId: nextRooms[roomIndex].blockId,
+      roomId: nextRooms[roomIndex].id,
+    };
+
+    nextAllocations.push({
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+      userId: student.id,
+      blockId: nextRooms[roomIndex].blockId,
+      roomId: nextRooms[roomIndex].id,
+      allocatedAt: new Date().toISOString(),
+    });
+
+    return true;
+  };
+
+  const assignStudentsByDepartment = (
+    studentsToAssign: Student[],
+    defaultCapacity: 4 | 5 | 6,
+    nextStudents: Student[],
+    nextRooms: Room[],
+    nextAllocations: Allocation[]
+  ) => {
+    const errors: string[] = [];
+    const assigned: string[] = [];
+
+    const studentsByGender = {
+      Female: studentsToAssign.filter(s => s.gender === 'Female').sort(sortStudentsByAssignment),
+      Male: studentsToAssign.filter(s => s.gender === 'Male').sort(sortStudentsByAssignment),
+    } as const;
+
+    const processGender = (gender: 'Male' | 'Female', incomingStudents: Student[]) => {
+      if (incomingStudents.length === 0) return;
+
+      const candidateRooms = buildAutoAssignableRooms(gender, defaultCapacity, nextRooms);
+      if (candidateRooms.length === 0) {
+        incomingStudents.forEach(student => {
+          errors.push(`No available automatic rooms for ${student.name} (${student.gender}).`);
+        });
+        return;
+      }
+
+      const departmentGroups = incomingStudents.reduce<Record<string, Student[]>>((groups, student) => {
+        const key = normalizeDepartment(student.department);
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(student);
+        return groups;
+      }, {});
+
+      Object.keys(departmentGroups).sort().forEach(departmentKey => {
+        const remainingStudents = [...departmentGroups[departmentKey]];
+        const blockOrder = Array.from(new Set(candidateRooms.map(r => r.blockId))).sort((a, b) => {
+          const numA = parseBlockNumber(blocks.find(block => block.id === a)?.name ?? '') || 0;
+          const numB = parseBlockNumber(blocks.find(block => block.id === b)?.name ?? '') || 0;
+          return numA - numB;
+        });
+
+        for (const blockId of blockOrder) {
+          if (remainingStudents.length === 0) break;
+
+          const blockRooms = candidateRooms.filter(r => r.blockId === blockId);
+          if (blockRooms.length === 0) continue;
+
+          const sameDepartmentRooms = blockRooms.filter(room => {
+            const occupantDepartments = room.occupants
+              .map(occupantId => nextStudents.find(s => s.id === occupantId))
+              .filter((s): s is Student => Boolean(s))
+              .map(s => normalizeDepartment(s.department));
+            return occupantDepartments.length > 0 && occupantDepartments.every(dep => dep === departmentKey);
+          });
+
+          const orderedRooms = [
+            ...sameDepartmentRooms,
+            ...blockRooms.filter(room => !sameDepartmentRooms.includes(room)),
+          ];
+
+          for (const room of orderedRooms) {
+            while (room.occupants.length < room.capacity && remainingStudents.length > 0) {
+              const studentToPlace = remainingStudents.shift()!;
+              const success = assignStudentToRoom(studentToPlace, room, nextStudents, nextRooms, nextAllocations);
+              if (success) {
+                assigned.push(studentToPlace.id);
+              } else {
+                errors.push(`Failed to assign ${studentToPlace.name} to room ${room.roomNumber}.`);
+                break;
+              }
+            }
+            if (remainingStudents.length === 0) break;
+          }
+        }
+
+        if (remainingStudents.length > 0) {
+          remainingStudents.forEach(student => {
+            errors.push(`No available room for ${student.name} in department ${student.department || 'Unspecified'}.`);
+          });
+        }
+      });
+    };
+
+    processGender('Female', studentsByGender.Female);
+    processGender('Male', studentsByGender.Male);
+
+    return { assigned, errors };
+  };
+
   const isRoomRoleCompatible = (incomingRole: Role, existingRoles: Role[]) => {
     if (incomingRole === 'Student') {
       return existingRoles.every(role => role === 'Student');
@@ -195,64 +342,16 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const nextStudents = [...students, ...importedStudents];
     const nextRooms = rooms.map(room => ({ ...room, occupants: [...room.occupants] }));
     const nextAllocations = [...allocations];
-    const assigned: string[] = [];
-    const errors: string[] = [];
 
-    const candidateRoomsByGender = {
-      Female: nextRooms.filter(r => isRoomAutoAssignable(r, 'Female', defaultCapacity)).sort(compareRoomsForAutoAssign),
-      Male: nextRooms.filter(r => isRoomAutoAssignable(r, 'Male', defaultCapacity)).sort(compareRoomsForAutoAssign),
-    } as const;
+    const { assigned, errors } = assignStudentsByDepartment(
+      importedStudents.filter(student => student.role === 'Student'),
+      defaultCapacity,
+      nextStudents,
+      nextRooms,
+      nextAllocations
+    );
 
-    const roomOccupancyMap = new Map<string, number>();
-    candidateRoomsByGender.Female.forEach(room => roomOccupancyMap.set(room.id, room.occupants.length));
-    candidateRoomsByGender.Male.forEach(room => roomOccupancyMap.set(room.id, room.occupants.length));
-
-    importedStudents
-      .filter(student => student.role === 'Student' && !student.roomId)
-      .sort(sortStudentsByAdmission)
-      .forEach(student => {
-        if (!student.admission_number && !student.studentId) {
-          errors.push(`Missing admission number or student ID for ${student.name}`);
-          return;
-        }
-
-        const targetRooms = candidateRoomsByGender[student.gender];
-        const room = targetRooms.find(r => (roomOccupancyMap.get(r.id) ?? r.occupants.length) < r.capacity);
-        if (!room) {
-          errors.push(`No available room for ${student.name}`);
-          return;
-        }
-
-        const currentOccupancy = roomOccupancyMap.get(room.id) ?? room.occupants.length;
-        if (currentOccupancy >= room.capacity) {
-          errors.push(`No available room for ${student.name}`);
-          return;
-        }
-
-        roomOccupancyMap.set(room.id, currentOccupancy + 1);
-        nextRooms.forEach(r => {
-          if (r.id === room.id) {
-            r.occupants = [...r.occupants, student.id];
-          }
-        });
-        nextAllocations.push({
-          id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
-          userId: student.id,
-          blockId: room.blockId,
-          roomId: room.id,
-          allocatedAt: new Date().toISOString(),
-        });
-        assigned.push(student.id);
-      });
-
-    const updatedStudents = nextStudents.map(student => {
-      const assignedRoom = nextRooms.find(room => room.occupants.includes(student.id));
-      return assignedRoom && student.role === 'Student' && student.roomId === undefined
-        ? { ...student, blockId: assignedRoom.blockId, roomId: assignedRoom.id }
-        : student;
-    });
-
-    setStudents(updatedStudents);
+    setStudents(nextStudents);
     setRooms(nextRooms);
     setAllocations(nextAllocations);
 
@@ -456,13 +555,15 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       .filter((room): room is Room => Boolean(room) && room.active)
       .sort(compareRoomsForAutoAssign);
 
+    const roomOccupancies = new Map(availableRooms.map(room => [room.id, room.occupants.length]));
     let roomIndex = 0;
     let studentIndex = 0;
 
     while (studentIndex < studentIds.length && roomIndex < availableRooms.length) {
       const currentRoom = availableRooms[roomIndex];
+      const currentOccupancy = roomOccupancies.get(currentRoom.id) ?? currentRoom.occupants.length;
 
-      if (currentRoom.occupants.length >= currentRoom.capacity) {
+      if (currentOccupancy >= currentRoom.capacity) {
         roomIndex++;
         continue;
       }
@@ -476,15 +577,13 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       } else {
         results.assigned.push(studentId);
         studentIndex++;
-        // After assignment, check if room is now at capacity
-        const updatedRoom = rooms.find(r => r.id === currentRoom.id);
-        if (updatedRoom && updatedRoom.occupants.length >= updatedRoom.capacity) {
+        roomOccupancies.set(currentRoom.id, currentOccupancy + 1);
+        if (currentOccupancy + 1 >= currentRoom.capacity) {
           roomIndex++;
         }
       }
     }
 
-    // Mark remaining students as skipped if no rooms available
     while (studentIndex < studentIds.length) {
       results.skipped.push({ id: studentIds[studentIndex], error: 'No available rooms' });
       studentIndex++;
@@ -507,50 +606,29 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   }, [blocks, rooms, bulkAssignToMultipleRooms]);
 
   const autoAssignStudents = useCallback((studentIds: string[], defaultCapacity: 4 | 5 | 6) => {
-    const errors: string[] = [];
-    const assignments: string[] = [];
     const studentsToAssign = studentIds
       .map(id => students.find(s => s.id === id))
-      .filter((s): s is Student => Boolean(s) && s.role === 'Student' && !s.roomId);
+      .filter((s): s is Student => Boolean(s) && s.role === 'Student' && !s.roomId)
+      .sort(sortStudentsByAssignment);
 
-    studentsToAssign.sort(sortStudentsByAdmission);
+    const nextStudents = students.map(student => ({ ...student }));
+    const nextRooms = rooms.map(room => ({ ...room, occupants: [...room.occupants] }));
+    const nextAllocations = [...allocations];
 
-    const candidateRoomsByGender = {
-      Female: rooms
-        .filter(r => isRoomAutoAssignable(r, 'Female', defaultCapacity))
-        .sort(compareRoomsForAutoAssign),
-      Male: rooms
-        .filter(r => isRoomAutoAssignable(r, 'Male', defaultCapacity))
-        .sort(compareRoomsForAutoAssign),
-    } as const;
+    const { assigned, errors } = assignStudentsByDepartment(
+      studentsToAssign,
+      defaultCapacity,
+      nextStudents,
+      nextRooms,
+      nextAllocations
+    );
 
-    const roomOccupancyMap = new Map<string, number>();
-    candidateRoomsByGender.Female.forEach(room => roomOccupancyMap.set(room.id, room.occupants.length));
-    candidateRoomsByGender.Male.forEach(room => roomOccupancyMap.set(room.id, room.occupants.length));
+    setStudents(nextStudents);
+    setRooms(nextRooms);
+    setAllocations(nextAllocations);
 
-    studentsToAssign.forEach(student => {
-      if (!student.admission_number && !student.studentId) {
-        errors.push(`Missing admission number or student ID for ${student.name}`);
-        return;
-      }
-      const targetRooms = candidateRoomsByGender[student.gender];
-      const room = targetRooms.find(r => (roomOccupancyMap.get(r.id) ?? r.occupants.length) < r.capacity);
-      if (!room) {
-        errors.push(`No available room for ${student.name}`);
-        return;
-      }
-      const currentOccupancy = roomOccupancyMap.get(room.id) ?? room.occupants.length;
-      const error = allocateStudent(student.id, room.blockId, room.id);
-      if (error) {
-        errors.push(`${student.name}: ${error}`);
-      } else {
-        assignments.push(student.id);
-        roomOccupancyMap.set(room.id, currentOccupancy + 1);
-      }
-    });
-
-    return { assigned: assignments, errors };
-  }, [students, rooms, blocks, allocateStudent]);
+    return { assigned, errors };
+  }, [students, rooms, allocations]);
 
   const deallocateStudent = useCallback((studentId: string, role?: Role) => {
     console.log('deallocateStudent called', { studentId, role });

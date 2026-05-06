@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const Rooms = () => {
-  const { blocks, rooms, students, addBlock, updateBlock, deleteBlock, addRoom, updateRoom, deleteRoom, deactivateRoom, deactivateBlock, reactivateRoom, reactivateBlock } = useData();
+  const { blocks, rooms, students, allocations, addBlock, updateBlock, deleteBlock, addRoom, updateRoom, deleteRoom, deactivateRoom, deactivateBlock, reactivateRoom, reactivateBlock } = useData();
   const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [roomModalOpen, setRoomModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<Block | null>(null);
@@ -482,7 +482,9 @@ const Rooms = () => {
               className="w-full px-3 py-2 rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring" required>
               <option value="">Select Block</option>
               {blocks.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+                <option key={b.id} value={b.id} disabled={!b.active}>
+                  {b.name} {!b.active ? '(Inactive)' : ''}
+                </option>
               ))}
             </select>
           </div>
@@ -540,8 +542,10 @@ const Rooms = () => {
                   required
                 >
                   <option value="">Select block for reassignment</option>
-                  {blocks.filter(b => b.id !== blockToDeactivate.id && b.active).map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
+                  {blocks.filter(b => b.id !== blockToDeactivate.id).map(b => (
+                    <option key={b.id} value={b.id} disabled={!b.active}>
+                      {b.name} {!b.active ? '(Inactive)' : ''}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -578,8 +582,10 @@ const Rooms = () => {
                 required
               >
                 <option value="">Select block for reassignment</option>
-                {blocks.filter(b => b.active).map(b => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
+                {blocks.map(b => (
+                  <option key={b.id} value={b.id} disabled={!b.active}>
+                    {b.name} {!b.active ? '(Inactive)' : ''}
+                  </option>
                 ))}
               </select>
             </div>

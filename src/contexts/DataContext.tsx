@@ -37,28 +37,63 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | null>(null);
 
 export const DataProvider = ({ children }: { children: ReactNode }) => {
+  const DORM_SCHEMA_VERSION = 2;
+
   const STORAGE_KEYS = {
+    version: 'dorm-schema-version',
     students: 'dorm-students',
     blocks: 'dorm-blocks',
     rooms: 'dorm-rooms',
     allocations: 'dorm-allocations',
   } as const;
 
-  const [students, setStudents] = useState<Student[]>(() =>
-    storage.get<Student[]>(STORAGE_KEYS.students, initialStudents)
-  );
-  const [blocks, setBlocks] = useState<Block[]>(() =>
-    storage.get<Block[]>(STORAGE_KEYS.blocks, initialBlocks)
-  );
-  const [rooms, setRooms] = useState<Room[]>(() => {
-    const stored = storage.get<Room[]>(STORAGE_KEYS.rooms, []);
-    return stored.length
-      ? stored
-      : initialRooms.map(r => ({ ...r, capacity: r.capacity ?? 6, active: r.active ?? true }));
-  });
-  const [allocations, setAllocations] = useState<Allocation[]>(() =>
-    storage.get<Allocation[]>(STORAGE_KEYS.allocations, initialAllocations)
-  );
+  const loadSchemaVersion = () => storage.get<number>(STORAGE_KEYS.version, 0);
+  const currentVersion = loadSchemaVersion();
+
+  const loadBlocks = (): Block[] => {
+    const storedBlocks = storage.get<Block[]>(STORAGE_KEYS.blocks, []);
+    const storedRooms = storage.get<Room[]>(STORAGE_KEYS.rooms, []);
+
+    if (currentVersion !== DORM_SCHEMA_VERSION || !storedBlocks.length || !storedRooms.length) {
+      storage.set(STORAGE_KEYS.version, DORM_SCHEMA_VERSION);
+      storage.set(STORAGE_KEYS.blocks, initialBlocks);
+      storage.set(STORAGE_KEYS.rooms, initialRooms.map(r => ({ ...r, capacity: r.capacity ?? 6, active: r.active ?? true })));
+      return initialBlocks;
+    }
+
+    return storedBlocks.map(block => {
+      const actualRoomCount = storedRooms.filter(room => room.blockId === block.id).length;
+      return actualRoomCount !== block.numberOfRooms
+        ? { ...block, numberOfRooms: actualRoomCount }
+        : block;
+    });
+  };
+
+  const loadRooms = (): Room[] => {
+    const storedRooms = storage.get<Room[]>(STORAGE_KEYS.rooms, []);
+    if (currentVersion !== DORM_SCHEMA_VERSION || !storedRooms.length) {
+      return initialRooms.map(r => ({ ...r, capacity: r.capacity ?? 6, active: r.active ?? true }));
+    }
+    return storedRooms.map(r => ({ ...r, capacity: r.capacity ?? 6, active: r.active ?? true }));
+  };
+
+  const loadStudents = (): Student[] => {
+    const storedStudents = storage.get<Student[]>(STORAGE_KEYS.students, initialStudents);
+    if (currentVersion !== DORM_SCHEMA_VERSION) {
+      return storedStudents.map(s => ({ ...s, blockId: undefined, roomId: undefined }));
+    }
+    return storedStudents;
+  };
+
+  const loadAllocations = (): Allocation[] => {
+    if (currentVersion !== DORM_SCHEMA_VERSION) return [];
+    return storage.get<Allocation[]>(STORAGE_KEYS.allocations, initialAllocations);
+  };
+
+  const [students, setStudents] = useState<Student[]>(loadStudents);
+  const [blocks, setBlocks] = useState<Block[]>(loadBlocks);
+  const [rooms, setRooms] = useState<Room[]>(loadRooms);
+  const [allocations, setAllocations] = useState<Allocation[]>(loadAllocations);
 
   useEffect(() => {
     storage.set(STORAGE_KEYS.students, students);
@@ -730,10 +765,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       }
 
       updatedRooms = updatedRooms.map(r => r.blockId === blockId ? { ...r, active: false } : r);
+      const updatedBlocks = blocks.map(b => b.id === blockId ? { ...b, active: false } : b);
       updatedStudents = updatedStudents.map(s => s.blockId === blockId ? { ...s, blockId: undefined, roomId: undefined } : s);
       updatedAllocations = updatedAllocations.filter(a => a.blockId !== blockId);
       setStudents(updatedStudents);
       setRooms(updatedRooms);
+      setBlocks(updatedBlocks);
       setAllocations(updatedAllocations);
       return { success: true, errors: [] };
     }

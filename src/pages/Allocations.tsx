@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const Allocations = () => {
-  const { blocks, rooms, allocations, students, allocateStudent, deallocateStudent } = useData();
+  const { blocks, rooms, allocations, students, allocateStudent, deallocateStudent, bulkAssignStudents, bulkAssignToBlock } = useData();
   const [expandedBlock, setExpandedBlock] = useState<string | null>(null);
   const [expandedRooms, setExpandedRooms] = useState<string[]>([]);
   const [search, setSearch] = useState('');
@@ -29,24 +29,21 @@ const Allocations = () => {
   // For assign from Occupants tab
   const [assignStudentId, setAssignStudentId] = useState('');
   const [assignRoomId, setAssignRoomId] = useState('');
-
-  // Category override state
-  const [overrideDialog, setOverrideDialog] = useState<{
-    open: boolean;
-    studentId: string;
-    roomId: string;
-    blockId: string;
-    targetCategory: string;
-    existingCategory: string;
-  } | null>(null);
+  const [bulkStudentIds, setBulkStudentIds] = useState<string[]>([]);
+  const [bulkBlockId, setBulkBlockId] = useState('');
 
   const getAllocationByRoom = (roomId: string) => allocations.find(a => a.roomId === roomId);
   const getStudent = (userId: string | null) => userId ? students.find(s => s.id === userId) : undefined;
 
   const getRoomStatus = (roomId: string) => {
-    const allocation = getAllocationByRoom(roomId);
-    if (allocation) {
-      return { status: 'Occupied', userId: allocation.userId, allocation };
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) return { status: 'Unknown', userId: null, allocation: null };
+
+    if (room.occupants.length >= room.capacity) {
+      return { status: 'Full', userId: null, allocation: null };
+    }
+    if (room.occupants.length > 0) {
+      return { status: 'Partially Occupied', userId: null, allocation: null };
     }
     return { status: 'Available', userId: null, allocation: null };
   };
@@ -60,31 +57,40 @@ const Allocations = () => {
   };
 
   const roomMatchesSearch = (room: typeof rooms[number]) => {
-    const allocation = getAllocationByRoom(room.id);
-    const student = allocation ? getStudent(allocation.userId) : undefined;
     const block = blocks.find(b => b.id === room.blockId);
-    const statusText = allocation ? 'occupied' : 'available';
+    const statusText = room.occupants.length >= room.capacity ? 'full' :
+                      room.occupants.length > 0 ? 'partially occupied' : 'available';
     const query = search.toLowerCase();
-    return (
-      room.roomNumber.toString().includes(query) ||
-      room.capacity.toString().includes(query) ||
-      room.occupants.length.toString().includes(query) ||
-      (student?.name.toLowerCase().includes(query) ?? false) ||
-      (student?.studentId.toLowerCase().includes(query) ?? false) ||
-      (student?.phone.toLowerCase().includes(query) ?? false) ||
-      (student?.batch?.toLowerCase().includes(query) ?? false) ||
-      (student?.category?.toLowerCase().includes(query) ?? false) ||
-      (student?.gender.toLowerCase().includes(query) ?? false) ||
-      (block?.name.toLowerCase().includes(query) ?? false) ||
-      statusText.includes(query)
-    );
+
+    // Check room properties
+    if (room.roomNumber.toString().includes(query) ||
+        room.capacity.toString().includes(query) ||
+        room.occupants.length.toString().includes(query) ||
+        statusText.includes(query) ||
+        (block?.name.toLowerCase().includes(query) ?? false)) {
+      return true;
+    }
+
+    // Check all occupants
+    return room.occupants.some(occupantId => {
+      const student = students.find(s => s.id === occupantId);
+      return student && (
+        student.name.toLowerCase().includes(query) ||
+        student.studentId.toLowerCase().includes(query) ||
+        student.phone.includes(query) ||
+        student.gender.toLowerCase().includes(query) ||
+        (student.batch?.toLowerCase().includes(query) ?? false) ||
+        (student.category?.toLowerCase().includes(query) ?? false) ||
+        student.role.toLowerCase().includes(query)
+      );
+    });
   };
 
   const getRoomCategory = (roomId: string): string | null => {
     const room = rooms.find(r => r.id === roomId);
     if (!room || room.occupants.length === 0) return null;
     const occupant = students.find(s => s.id === room.occupants[0]);
-    return occupant?.category || null;
+    return occupant?.role || null;
   };
 
   const executeAssign = (studentId: string, roomId: string, blockId: string): boolean => {
@@ -112,20 +118,12 @@ const Allocations = () => {
       toast.error('Room not found');
       return false;
     }
-    if (room.occupants.length >= room.capacity) {
-      toast.error('Room is full');
+    if (!room.active) {
+      toast.error('Room is inactive and cannot be assigned');
       return false;
     }
-    const existingCategory = getRoomCategory(roomId);
-    if (existingCategory && student.category !== existingCategory) {
-      setOverrideDialog({
-        open: true,
-        studentId,
-        roomId,
-        blockId,
-        targetCategory: student.category || 'Unknown',
-        existingCategory: existingCategory,
-      });
+    if (room.occupants.length >= room.capacity) {
+      toast.error('Room is full');
       return false;
     }
     return executeAssign(studentId, roomId, blockId);
@@ -156,7 +154,7 @@ const Allocations = () => {
   }).filter(item => item.rooms.length > 0);
 
   const unassignedStudents = students.filter(s => !s.roomId);
-  const availableRooms = rooms.filter(r => r.occupants.length < r.capacity);
+  const availableRooms = rooms.filter(r => r.occupants.length < r.capacity && r.active);
 
   // For the "Assign from Occupants tab" button
   const handleAssignFromOccupants = () => {
@@ -173,6 +171,32 @@ const Allocations = () => {
     const block = blocks.find(b => b.id === room.blockId);
     if (!block) return;
     attemptAssign(assignStudentId, assignRoomId, block.id);
+  };
+
+  const handleBulkStudentToggle = (studentId: string) => {
+    setBulkStudentIds(prev => prev.includes(studentId)
+      ? prev.filter(id => id !== studentId)
+      : [...prev, studentId]);
+  };
+
+  const handleBulkAssign = () => {
+    if (bulkStudentIds.length === 0) {
+      toast.error('Select at least one user to assign.');
+      return;
+    }
+    if (!bulkBlockId) {
+      toast.error('Select a block to assign into.');
+      return;
+    }
+    const result = bulkAssignToBlock(bulkStudentIds, bulkBlockId);
+    if (result.assigned.length) {
+      toast.success(`${result.assigned.length} user(s) assigned successfully.`);
+    }
+    if (result.skipped.length) {
+      result.skipped.forEach(item => toast.error(`${item.id}: ${item.error}`));
+    }
+    setBulkStudentIds([]);
+    setBulkBlockId('');
   };
 
   return (
@@ -269,46 +293,69 @@ const Allocations = () => {
                                   )}
                                 </div>
 
-                                {status === 'Occupied' ? (
-                                  student ? (
-                                    <div className="rounded-xl border bg-background p-4 space-y-3">
-                                      <p className="font-medium text-card-foreground">Assigned student details</p>
-                                      <div className="grid gap-2 sm:grid-cols-2 text-sm text-muted-foreground">
-                                        <div>Name: <span className="font-medium text-card-foreground">{student.name}</span></div>
-                                        <div>Student ID: <span className="font-medium text-card-foreground">{student.studentId}</span></div>
-                                        <div>Phone: <span className="font-medium text-card-foreground">{student.phone}</span></div>
-                                        <div>Gender: <span className="font-medium text-card-foreground">{student.gender}</span></div>
-                                        <div>Batch: <span className="font-medium text-card-foreground">{student.batch ?? 'N/A'}</span></div>
-                                        <div>Category: <span className="font-medium text-card-foreground">{student.category ?? 'N/A'}</span></div>
-                                        <div>Block: <span className="font-medium text-card-foreground">{block.name}</span></div>
-                                        <div>Room: <span className="font-medium text-card-foreground">{room.roomNumber}</span></div>
+                                {room.occupants.length > 0 ? (
+                                  <div className="rounded-xl border bg-background p-4 space-y-4">
+                                    <p className="font-medium text-card-foreground">Current occupants ({room.occupants.length}/{room.capacity})</p>
+                                    {room.occupants.length > 0 ? (
+                                      <div className="space-y-3">
+                                        {room.occupants.map(userId => {
+                                          const occupant = students.find(s => s.id === userId);
+                                          return occupant ? (
+                                            <div key={userId} className="rounded-lg border bg-muted/10 p-3">
+                                              <div className="grid gap-2 sm:grid-cols-2 text-sm text-muted-foreground">
+                                                <div>Name: <span className="font-medium text-card-foreground">{occupant.name}</span></div>
+                                                <div>ID: <span className="font-medium text-card-foreground">{occupant.studentId}</span></div>
+                                                <div>Role: <span className="font-medium text-card-foreground">{occupant.role}</span></div>
+                                                <div>Gender: <span className="font-medium text-card-foreground">{occupant.gender}</span></div>
+                                                <div>Phone: <span className="font-medium text-card-foreground">{occupant.phone}</span></div>
+                                                <div>Block: <span className="font-medium text-card-foreground">{block.name}</span></div>
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDeallocate(occupant.id)}
+                                                className="mt-3 inline-flex items-center justify-center rounded-lg bg-destructive px-3 py-2 text-sm text-destructive-foreground hover:bg-destructive/90"
+                                              >
+                                                Deallocate
+                                              </button>
+                                            </div>
+                                          ) : null;
+                                        })}
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeallocate(student.id)}
-                                        className="mt-3 inline-flex items-center justify-center rounded-lg bg-destructive px-3 py-2 text-sm text-destructive-foreground hover:bg-destructive/90"
-                                      >
-                                        Deallocate student
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <div className="rounded-xl border bg-background p-4 space-y-3">
-                                      <p className="font-medium text-card-foreground">Allocated user details</p>
-                                      <div className="text-sm text-muted-foreground">
-                                        <div>User ID: <span className="font-medium text-card-foreground">{allocation?.userId}</span></div>
-                                        <div>Room capacity: <span className="font-medium text-card-foreground">{room.capacity}</span></div>
-                                        <div>Occupants: <span className="font-medium text-card-foreground">{room.occupants.length}</span></div>
-                                        <div>Allocation date: <span className="font-medium text-card-foreground">{allocation?.allocatedAt ?? 'N/A'}</span></div>
+                                    ) : (
+                                      <p className="text-sm text-muted-foreground">No occupants in this room.</p>
+                                    )}
+
+                                    {room.occupants.length < room.capacity && (
+                                      <div className="border-t pt-4">
+                                        <div>
+                                          <label className="block text-sm font-medium text-card-foreground mb-2">Add another student</label>
+                                          <select
+                                            value={selectedStudent[room.id] ?? ''}
+                                            onChange={e => setSelectedStudent(prev => ({ ...prev, [room.id]: e.target.value }))}
+                                            className="w-full px-3 py-2 rounded-lg border bg-background text-card-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                                          >
+                                            <option value="">Select student</option>
+                                            {unassignedForBlock.map(studentOption => (
+                                              <option key={studentOption.id} value={studentOption.id}>
+                                                {studentOption.name} ({studentOption.studentId}) - {studentOption.category || 'No category'}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAssign(room.id, block.id)}
+                                          disabled={unassignedForBlock.length === 0}
+                                          className="mt-3 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-primary/40"
+                                        >
+                                          Add to room
+                                        </button>
+                                        {unassignedForBlock.length === 0 && (
+                                          <p className="text-sm text-muted-foreground">No unassigned students available.</p>
+                                        )}
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => allocation?.userId && handleDeallocate(allocation.userId)}
-                                        className="mt-3 inline-flex items-center justify-center rounded-lg bg-destructive px-3 py-2 text-sm text-destructive-foreground hover:bg-destructive/90"
-                                      >
-                                        Deallocate user
-                                      </button>
-                                    </div>
-                                  )
+                                    )}
+                                  </div>
                                 ) : (
                                   <div className="space-y-3">
                                     <div>
@@ -321,24 +368,24 @@ const Allocations = () => {
                                         <option value="">Select student</option>
                                         {unassignedForBlock.map(studentOption => (
                                           <option key={studentOption.id} value={studentOption.id}>
-                                            {studentOption.name} ({studentOption.studentId}) - {studentOption.category || 'No category'}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleAssign(room.id, block.id)}
-                                      disabled={unassignedForBlock.length === 0}
-                                      className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-primary/40"
-                                    >
-                                      Assign to room
-                                    </button>
-                                    {unassignedForBlock.length === 0 && (
-                                      <p className="text-sm text-muted-foreground">No unassigned students available.</p>
+                                                {studentOption.name} ({studentOption.studentId}) - {studentOption.category || 'No category'}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAssign(room.id, block.id)}
+                                          disabled={unassignedForBlock.length === 0}
+                                          className="inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-primary/40"
+                                        >
+                                          Assign to room
+                                        </button>
+                                        {unassignedForBlock.length === 0 && (
+                                          <p className="text-sm text-muted-foreground">No unassigned students available.</p>
+                                        )}
+                                      </div>
                                     )}
-                                  </div>
-                                )}
                               </div>
                             )}
                           </div>
@@ -402,6 +449,64 @@ const Allocations = () => {
               >
                 Assign Student
               </button>
+            </div>
+          </div>
+
+          <div className="bg-card rounded-xl border shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Users className="w-5 h-5 text-primary" />
+              <h3 className="font-semibold text-card-foreground">Bulk Assign Users</h3>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-[2fr_1fr] mb-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Select users</label>
+                <div className="max-h-60 overflow-y-auto rounded-lg border bg-background p-2">
+                  {unassignedStudents.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No unassigned users available.</p>
+                  ) : (
+                    unassignedStudents.map(user => (
+                      <label key={user.id} className="flex items-center gap-2 mb-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={bulkStudentIds.includes(user.id)}
+                          onChange={() => handleBulkStudentToggle(user.id)}
+                          className="h-4 w-4 rounded border"
+                        />
+                        <span>{user.name} ({user.studentId}) - {user.role}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1">Target block</label>
+                  <select
+                    value={bulkBlockId}
+                    onChange={e => setBulkBlockId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border bg-background"
+                  >
+                    <option value="">Choose block</option>
+                    {blocks.filter(b => b.active).map(block => {
+                      const blockRooms = rooms.filter(r => r.blockId === block.id && r.active);
+                      const totalCapacity = blockRooms.reduce((sum, r) => sum + r.capacity, 0);
+                      const totalOccupants = blockRooms.reduce((sum, r) => sum + r.occupants.length, 0);
+                      return (
+                        <option key={block.id} value={block.id}>
+                          {block.name} ({totalOccupants}/{totalCapacity} beds available)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <button
+                  onClick={handleBulkAssign}
+                  disabled={!bulkBlockId || bulkStudentIds.length === 0}
+                  className="w-full rounded-lg bg-primary px-4 py-2 text-primary-foreground hover:opacity-90 disabled:opacity-50 font-medium"
+                >
+                  Bulk Assign to Block
+                </button>
+              </div>
             </div>
           </div>
 
@@ -497,33 +602,6 @@ const Allocations = () => {
       </Tabs>
 
       {/* Category mismatch confirmation dialog */}
-      <AlertDialog open={overrideDialog?.open || false} onOpenChange={(open) => !open && setOverrideDialog(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Category mismatch</AlertDialogTitle>
-            <AlertDialogDescription>
-              The student you are trying to assign has category <strong>{overrideDialog?.targetCategory}</strong>.<br />
-              The room currently contains students from category <strong>{overrideDialog?.existingCategory}</strong>.<br /><br />
-              Assigning a student from a different category may cause issues with room management.<br />
-              Are you sure you want to continue?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (overrideDialog) {
-                  executeAssign(overrideDialog.studentId, overrideDialog.roomId, overrideDialog.blockId);
-                  setOverrideDialog(null);
-                }
-              }}
-              className="bg-warning text-warning-foreground"
-            >
-              Yes, assign anyway
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };

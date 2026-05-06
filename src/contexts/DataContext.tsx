@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 import type { Role } from '@/types/role';
+import { storage } from '@/utils/storage';
 import { initialStudents, type Student } from '@/data/students';
 import { initialBlocks, initialRooms, type Block, type Room } from '@/data/rooms';
 import { initialAllocations, type Allocation } from '@/data/allocations';
@@ -9,7 +10,7 @@ interface DataContextType {
   blocks: Block[];
   rooms: Room[];
   allocations: Allocation[];
-  addStudent: (data: Omit<Student, 'id' | 'blockId' | 'roomId'>) => void;
+  addStudent: (data: Omit<Student, 'id' | 'blockId' | 'roomId'>) => string;
   updateStudent: (student: Student) => void;
   deleteStudent: (id: string) => void;
   addBlock: (block: Omit<Block, 'id'>, role?: Role) => string | null;
@@ -17,7 +18,18 @@ interface DataContextType {
   deleteBlock: (id: string, role?: Role) => string | null;
   addRoom: (room: Omit<Room, 'id' | 'occupants'>, role?: Role) => string | null;
   updateRoom: (room: Room, role?: Role) => string | null;
+  ensureBlocks: (blockNames: string[], numberOfRooms: number, role?: Role) => { ids: string[]; rooms: Room[] } | { error: string };
   deleteRoom: (id: string, role?: Role) => string | null;
+  addStudents: (data: Omit<Student, 'id' | 'blockId' | 'roomId'>[]) => string[];
+  addStudentsAndAutoAssign: (data: Omit<Student, 'id' | 'blockId' | 'roomId'>[], defaultCapacity: 4 | 5 | 6) => { assigned: string[]; errors: string[]; addedIds: string[] };
+  bulkAssignStudents: (studentIds: string[], roomId: string, role?: Role) => { assigned: string[]; skipped: { id: string; error: string }[] };
+  bulkAssignToMultipleRooms: (studentIds: string[], roomIds: string[], role?: Role) => { assigned: string[]; skipped: { id: string; error: string }[] };
+  bulkAssignToBlock: (studentIds: string[], blockId: string, role?: Role) => { assigned: string[]; skipped: { id: string; error: string }[] };
+  autoAssignStudents: (studentIds: string[], defaultCapacity: 4 | 5 | 6) => { assigned: string[]; errors: string[] };
+  deactivateRoom: (roomId: string, reassignBlock?: string, role?: Role) => { success: boolean; errors: string[] };
+  deactivateBlock: (blockId: string, reassignBlock?: string, role?: Role) => { success: boolean; errors: string[] };
+  reactivateRoom: (roomId: string, role?: Role) => string | null;
+  reactivateBlock: (blockId: string, role?: Role) => string | null;
   allocateStudent: (studentId: string, blockId: string, roomId: string, role?: Role) => string | null;
   deallocateStudent: (studentId: string, role?: Role) => string | null;
 }
@@ -25,24 +37,230 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | null>(null);
 
 export const DataProvider = ({ children }: { children: ReactNode }) => {
-  const [students, setStudents] = useState<Student[]>(initialStudents);
-  const [blocks, setBlocks] = useState<Block[]>(initialBlocks);
-  const [rooms, setRooms] = useState<Room[]>(() =>
-    initialRooms.map(r => ({ ...r, capacity: r.capacity ?? 6, active: r.active ?? true }))
+  const STORAGE_KEYS = {
+    students: 'dorm-students',
+    blocks: 'dorm-blocks',
+    rooms: 'dorm-rooms',
+    allocations: 'dorm-allocations',
+  } as const;
+
+  const [students, setStudents] = useState<Student[]>(() =>
+    storage.get<Student[]>(STORAGE_KEYS.students, initialStudents)
   );
-  const [allocations, setAllocations] = useState<Allocation[]>(initialAllocations);
+  const [blocks, setBlocks] = useState<Block[]>(() =>
+    storage.get<Block[]>(STORAGE_KEYS.blocks, initialBlocks)
+  );
+  const [rooms, setRooms] = useState<Room[]>(() => {
+    const stored = storage.get<Room[]>(STORAGE_KEYS.rooms, []);
+    return stored.length
+      ? stored
+      : initialRooms.map(r => ({ ...r, capacity: r.capacity ?? 6, active: r.active ?? true }));
+  });
+  const [allocations, setAllocations] = useState<Allocation[]>(() =>
+    storage.get<Allocation[]>(STORAGE_KEYS.allocations, initialAllocations)
+  );
+
+  useEffect(() => {
+    storage.set(STORAGE_KEYS.students, students);
+  }, [students]);
+
+  useEffect(() => {
+    storage.set(STORAGE_KEYS.blocks, blocks);
+  }, [blocks]);
+
+  useEffect(() => {
+    storage.set(STORAGE_KEYS.rooms, rooms);
+  }, [rooms]);
+
+  useEffect(() => {
+    storage.set(STORAGE_KEYS.allocations, allocations);
+  }, [allocations]);
 
   const requireRole = (role?: Role) =>
     role === 'Coordinator' || role === 'TeamLeader' || role === 'VicePresident';
 
+  const isStaffRole = (role: Role) => role !== 'Student';
+
+  const normalizePhoneNumber = (phone: string) => {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('09') && digits.length >= 10) {
+      return `+251${digits.slice(1, 10)}`;
+    }
+    if (digits.startsWith('9') && digits.length === 9) {
+      return `+251${digits.slice(0, 9)}`;
+    }
+    if (digits.startsWith('251') && digits.length >= 12) {
+      return `+${digits.slice(0, 12)}`;
+    }
+    if (digits.length === 10 && digits.startsWith('09')) {
+      return `+251${digits.slice(1)}`;
+    }
+    if (digits.length === 9) {
+      return `+251${digits}`;
+    }
+    return phone;
+  };
+
+  const isValidEthiopianPhone = (phone: string) => /^\+2519\d{8}$/.test(phone);
+
+  const parseBlockNumber = (name: string) => {
+    const match = name.match(/\d+/);
+    return match ? Number(match[0]) : NaN;
+  };
+
+  const isGenderBlock = (blockName: string, gender: 'Male' | 'Female') => {
+    const blockNumber = parseBlockNumber(blockName);
+    if (Number.isNaN(blockNumber)) return true;
+    if (gender === 'Female') return blockNumber >= 501 && blockNumber <= 517;
+    if (gender === 'Male') return blockNumber >= 519;
+    return true;
+  };
+
+  const isRoomAssignableTo = (room: Room, incomingRole: Role) => {
+    if (!room.active) return false;
+    if (room.reservedFor === 'Proctor') return incomingRole === 'Proctor';
+    if (room.reservedFor === 'Student') return incomingRole === 'Student';
+    if (room.reservedFor === 'Staff') return incomingRole !== 'Student';
+    return true;
+  };
+
+  const isRoomAutoAssignable = (room: Room, gender: 'Male' | 'Female', capacity: 4 | 5 | 6) => (
+    room.active &&
+    room.capacity === capacity &&
+    !room.reservedFor &&
+    isGenderBlock(blocks.find(b => b.id === room.blockId)?.name ?? '', gender)
+  );
+
+  const compareRoomsForAutoAssign = (a: Room, b: Room) => {
+    const blockA = parseBlockNumber(blocks.find(block => block.id === a.blockId)?.name ?? '') || 0;
+    const blockB = parseBlockNumber(blocks.find(block => block.id === b.blockId)?.name ?? '') || 0;
+    if (blockA !== blockB) return blockA - blockB;
+    return a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true });
+  };
+
+  const isRoomRoleCompatible = (incomingRole: Role, existingRoles: Role[]) => {
+    if (incomingRole === 'Student') {
+      return existingRoles.every(role => role === 'Student');
+    }
+    if (existingRoles.some(role => role === 'Student')) {
+      return false;
+    }
+    return true;
+  };
+
+  const sortStudentsByAdmission = (a: Student, b: Student) => {
+    if (a.admission_number && b.admission_number) {
+      return a.admission_number.localeCompare(b.admission_number, undefined, { numeric: true });
+    }
+    if (a.admission_number) return -1;
+    if (b.admission_number) return 1;
+    return a.studentId.localeCompare(b.studentId, undefined, { numeric: true });
+  };
+
   // ========== STUDENT CRUD ==========
   const addStudent = useCallback((data: Omit<Student, 'id' | 'blockId' | 'roomId'>) => {
-    const newStudent: Student = { id: Date.now().toString(), blockId: undefined, roomId: undefined, ...data };
+    const normalizedPhone = normalizePhoneNumber(data.phone);
+    const newStudent: Student = {
+      id: Date.now().toString(),
+      blockId: undefined,
+      roomId: undefined,
+      ...data,
+      phone: normalizedPhone,
+    };
     setStudents(prev => [...prev, newStudent]);
+    return newStudent.id;
   }, []);
 
+  const addStudents = useCallback((data: Omit<Student, 'id' | 'blockId' | 'roomId'>[]) => {
+    const newStudents: Student[] = data.map(newPerson => ({
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+      blockId: undefined,
+      roomId: undefined,
+      ...newPerson,
+      phone: normalizePhoneNumber(newPerson.phone),
+    }));
+    setStudents(prev => [...prev, ...newStudents]);
+    return newStudents.map(s => s.id);
+  }, []);
+
+  const addStudentsAndAutoAssign = useCallback((data: Omit<Student, 'id' | 'blockId' | 'roomId'>[], defaultCapacity: 4 | 5 | 6) => {
+    const importedStudents: Student[] = data.map(newPerson => ({
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+      blockId: undefined,
+      roomId: undefined,
+      ...newPerson,
+      phone: normalizePhoneNumber(newPerson.phone),
+    }));
+
+    const nextStudents = [...students, ...importedStudents];
+    const nextRooms = rooms.map(room => ({ ...room, occupants: [...room.occupants] }));
+    const nextAllocations = [...allocations];
+    const assigned: string[] = [];
+    const errors: string[] = [];
+
+    const candidateRoomsByGender = {
+      Female: nextRooms.filter(r => isRoomAutoAssignable(r, 'Female', defaultCapacity)).sort(compareRoomsForAutoAssign),
+      Male: nextRooms.filter(r => isRoomAutoAssignable(r, 'Male', defaultCapacity)).sort(compareRoomsForAutoAssign),
+    } as const;
+
+    const roomOccupancyMap = new Map<string, number>();
+    candidateRoomsByGender.Female.forEach(room => roomOccupancyMap.set(room.id, room.occupants.length));
+    candidateRoomsByGender.Male.forEach(room => roomOccupancyMap.set(room.id, room.occupants.length));
+
+    importedStudents
+      .filter(student => student.role === 'Student' && !student.roomId)
+      .sort(sortStudentsByAdmission)
+      .forEach(student => {
+        if (!student.admission_number && !student.studentId) {
+          errors.push(`Missing admission number or student ID for ${student.name}`);
+          return;
+        }
+
+        const targetRooms = candidateRoomsByGender[student.gender];
+        const room = targetRooms.find(r => (roomOccupancyMap.get(r.id) ?? r.occupants.length) < r.capacity);
+        if (!room) {
+          errors.push(`No available room for ${student.name}`);
+          return;
+        }
+
+        const currentOccupancy = roomOccupancyMap.get(room.id) ?? room.occupants.length;
+        if (currentOccupancy >= room.capacity) {
+          errors.push(`No available room for ${student.name}`);
+          return;
+        }
+
+        roomOccupancyMap.set(room.id, currentOccupancy + 1);
+        nextRooms.forEach(r => {
+          if (r.id === room.id) {
+            r.occupants = [...r.occupants, student.id];
+          }
+        });
+        nextAllocations.push({
+          id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+          userId: student.id,
+          blockId: room.blockId,
+          roomId: room.id,
+          allocatedAt: new Date().toISOString(),
+        });
+        assigned.push(student.id);
+      });
+
+    const updatedStudents = nextStudents.map(student => {
+      const assignedRoom = nextRooms.find(room => room.occupants.includes(student.id));
+      return assignedRoom && student.role === 'Student' && student.roomId === undefined
+        ? { ...student, blockId: assignedRoom.blockId, roomId: assignedRoom.id }
+        : student;
+    });
+
+    setStudents(updatedStudents);
+    setRooms(nextRooms);
+    setAllocations(nextAllocations);
+
+    return { assigned, errors, addedIds: importedStudents.map(s => s.id) };
+  }, [students, rooms, allocations]);
+
   const updateStudent = useCallback((updated: Student) => {
-    setStudents(prev => prev.map(s => (s.id === updated.id ? updated : s)));
+    setStudents(prev => prev.map(s => (s.id === updated.id ? { ...updated, phone: normalizePhoneNumber(updated.phone) } : s)));
   }, []);
 
   const deleteStudent = useCallback((id: string) => {
@@ -57,11 +275,17 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   // ========== BLOCK ==========
   const addBlock = useCallback((block: Omit<Block, 'id'>, role?: Role) => {
     if (role && !requireRole(role)) return 'No permission';
-    if (block.numberOfRooms < 20 || block.numberOfRooms > 50) return 'Rooms must be 20-50';
+    if (block.numberOfRooms < 1 || block.numberOfRooms > 150) return 'Rooms must be 1-150';
     const id = Date.now().toString();
-    setBlocks(prev => [...prev, { ...block, id }]);
+    setBlocks(prev => [...prev, { ...block, id, active: block.active ?? true }]);
     const newRooms: Room[] = Array.from({ length: block.numberOfRooms }).map((_, i) => ({
-      id: `${id}-${i + 1}`, blockId: id, roomNumber: `${i + 1}`, capacity: 6, occupants: [], active: true,
+      id: `${id}-${i + 1}`,
+      blockId: id,
+      roomNumber: `${i + 1}`,
+      capacity: 6,
+      occupants: [],
+      active: true,
+      reservedFor: i === 0 ? 'Proctor' : undefined,
     }));
     setRooms(prev => [...prev, ...newRooms]);
     return null;
@@ -89,51 +313,244 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     return null;
   }, []);
 
+  const ensureBlocks = useCallback((blockNames: string[], numberOfRooms: number, role?: Role) => {
+    if (role && !requireRole(role)) return { error: 'No permission' };
+    if (numberOfRooms < 1 || numberOfRooms > 150) return { error: 'Rooms must be 1-150' };
+
+    const existingBlocksByName = new Map(blocks.map(b => [b.name, b.id]));
+    const createdBlocks: Block[] = [];
+    const createdRooms: Room[] = [];
+    const ids: string[] = [];
+
+    blockNames.forEach(name => {
+      const existingId = existingBlocksByName.get(name);
+      if (existingId) {
+        ids.push(existingId);
+        return;
+      }
+
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}-${name}`;
+      createdBlocks.push({ id, name, numberOfRooms, active: true });
+      ids.push(id);
+      for (let i = 0; i < numberOfRooms; i += 1) {
+        createdRooms.push({
+          id: `${id}-${i + 1}`,
+          blockId: id,
+          roomNumber: `${i + 1}`,
+          capacity: 6,
+          occupants: [],
+          active: true,
+          reservedFor: i === 0 ? 'Proctor' : undefined,
+        });
+      }
+    });
+
+    if (createdBlocks.length) {
+      setBlocks(prev => [...prev, ...createdBlocks]);
+      setRooms(prev => [...prev, ...createdRooms]);
+    }
+
+    return { ids, rooms: createdRooms };
+  }, [blocks]);
+
   const updateRoom = useCallback((room: Room, role?: Role) => {
     if (role && !requireRole(role)) return 'No permission';
-    setRooms(prev => prev.map(r => r.id === room.id ? { ...room, capacity: Math.min(10, Math.max(1, room.capacity)) } : r));
+    setRooms(prev => prev.map(r => r.id === room.id ? {
+      ...r,
+      capacity: Math.min(10, Math.max(1, room.capacity)),
+      active: room.active,
+      reservedFor: room.reservedFor,
+      roomNumber: room.roomNumber,
+      blockId: room.blockId,
+    } : r));
     return null;
   }, []);
 
   const deleteRoom = useCallback((id: string, role?: Role) => {
     if (role && !requireRole(role)) return 'No permission';
-    if (rooms.find(r => r.id === id)?.occupants.length) return 'Room not empty';
+    const room = rooms.find(r => r.id === id);
+    if (!room) return 'Room not found';
+    if (room.occupants.length) return 'Room has occupants';
     setRooms(prev => prev.filter(r => r.id !== id));
     return null;
   }, [rooms]);
 
-  // ========== ALLOCATION ==========
+  const getRoomAllocationStaffRoles = (room: Room) => room.occupants
+    .map(occupantId => students.find(s => s.id === occupantId)?.role)
+    .filter((role): role is Role => Boolean(role));
+
   const allocateStudent = useCallback((studentId: string, blockId: string, roomId: string, role?: Role) => {
-    console.log('allocateStudent called', { studentId, blockId, roomId, role });
     if (role && !requireRole(role)) return 'No permission';
     const student = students.find(s => s.id === studentId);
     if (!student) return 'Student not found';
-    if (student.roomId) return 'Already assigned';
     const room = rooms.find(r => r.id === roomId);
     if (!room) return 'Room not found';
     if (!room.active) return 'Room inactive';
+    if (!isRoomAssignableTo(room, student.role)) {
+      if (room.reservedFor === 'Proctor') return 'Only a Proctor may occupy this reserved room.';
+      if (room.reservedFor === 'Student') return 'Only students may occupy this room.';
+      return 'This room cannot accept this role.';
+    }
     if (room.occupants.length >= room.capacity) return 'Room full';
 
-    // Update student
-    setStudents(prev => {
-      const updated = prev.map(s => s.id === studentId ? { ...s, blockId, roomId } : s);
-      console.log('Students after assign:', updated);
-      return updated;
-    });
-    // Update room occupants
-    setRooms(prev => {
-      const updated = prev.map(r => r.id === roomId ? { ...r, occupants: [...r.occupants, studentId] } : r);
-      console.log('Rooms after assign:', updated);
-      return updated;
-    });
-    // Add allocation record
-    setAllocations(prev => {
-      const newAlloc = { id: Date.now().toString(), userId: studentId, blockId, roomId, allocatedAt: new Date().toISOString() };
-      console.log('New allocation:', newAlloc);
-      return [...prev, newAlloc];
-    });
+    const occupantRoles = getRoomAllocationStaffRoles(room);
+    if (occupantRoles.length > 0 && !isRoomRoleCompatible(student.role, occupantRoles)) {
+      if (student.role === 'Student') {
+        return 'Students can only share with other students.';
+      }
+      if (occupantRoles.some(roleItem => roleItem === 'Student')) {
+        return 'Staff cannot share rooms with students.';
+      }
+      return 'Staff may only share rooms with other staff members.';
+    }
+
+    const previousRoomId = student.roomId;
+    if (previousRoomId === roomId) {
+      return 'User already assigned to this room.';
+    }
+
+    if (previousRoomId) {
+      setRooms(prev => prev.map(r => r.id === previousRoomId ? { ...r, occupants: r.occupants.filter(o => o !== studentId) } : r));
+      setAllocations(prev => prev.filter(a => a.userId !== studentId));
+    }
+
+    setStudents(prev => prev.map(s => s.id === studentId ? { ...s, blockId, roomId } : s));
+    setRooms(prev => prev.map(r => r.id === roomId ? { ...r, occupants: [...r.occupants, studentId] } : r));
+    setAllocations(prev => [...prev, {
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+      userId: studentId,
+      blockId,
+      roomId,
+      allocatedAt: new Date().toISOString(),
+    }] );
     return null;
   }, [students, rooms]);
+
+  const bulkAssignStudents = useCallback((studentIds: string[], roomId: string, role?: Role) => {
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) return { assigned: [], skipped: studentIds.map(id => ({ id, error: 'Room not found' })) };
+    const results: { assigned: string[]; skipped: { id: string; error: string }[] } = { assigned: [], skipped: [] };
+    let currentOccupancy = room.occupants.length;
+
+    studentIds.forEach(studentId => {
+      if (currentOccupancy >= room.capacity) {
+        results.skipped.push({ id: studentId, error: 'Room full' });
+        return;
+      }
+      const error = allocateStudent(studentId, room.blockId, roomId, role);
+      if (error) {
+        results.skipped.push({ id: studentId, error });
+      } else {
+        results.assigned.push(studentId);
+        currentOccupancy += 1;
+      }
+    });
+
+    return results;
+  }, [allocateStudent, rooms]);
+
+  const bulkAssignToMultipleRooms = useCallback((studentIds: string[], roomIds: string[], role?: Role) => {
+    const results: { assigned: string[]; skipped: { id: string; error: string }[] } = { assigned: [], skipped: [] };
+    const availableRooms = roomIds
+      .map(id => rooms.find(r => r.id === id))
+      .filter((room): room is Room => Boolean(room) && room.active)
+      .sort(compareRoomsForAutoAssign);
+
+    let roomIndex = 0;
+    let studentIndex = 0;
+
+    while (studentIndex < studentIds.length && roomIndex < availableRooms.length) {
+      const currentRoom = availableRooms[roomIndex];
+
+      if (currentRoom.occupants.length >= currentRoom.capacity) {
+        roomIndex++;
+        continue;
+      }
+
+      const studentId = studentIds[studentIndex];
+      const error = allocateStudent(studentId, currentRoom.blockId, currentRoom.id, role);
+
+      if (error) {
+        results.skipped.push({ id: studentId, error });
+        studentIndex++;
+      } else {
+        results.assigned.push(studentId);
+        studentIndex++;
+        // After assignment, check if room is now at capacity
+        const updatedRoom = rooms.find(r => r.id === currentRoom.id);
+        if (updatedRoom && updatedRoom.occupants.length >= updatedRoom.capacity) {
+          roomIndex++;
+        }
+      }
+    }
+
+    // Mark remaining students as skipped if no rooms available
+    while (studentIndex < studentIds.length) {
+      results.skipped.push({ id: studentIds[studentIndex], error: 'No available rooms' });
+      studentIndex++;
+    }
+
+    return results;
+  }, [allocateStudent, rooms]);
+
+  const bulkAssignToBlock = useCallback((studentIds: string[], blockId: string, role?: Role) => {
+    const block = blocks.find(b => b.id === blockId);
+    if (!block || !block.active) {
+      return { assigned: [], skipped: studentIds.map(id => ({ id, error: 'Block not found or inactive' })) };
+    }
+
+    const blockRooms = rooms
+      .filter(r => r.blockId === blockId && r.active)
+      .sort(compareRoomsForAutoAssign);
+
+    return bulkAssignToMultipleRooms(studentIds, blockRooms.map(r => r.id), role);
+  }, [blocks, rooms, bulkAssignToMultipleRooms]);
+
+  const autoAssignStudents = useCallback((studentIds: string[], defaultCapacity: 4 | 5 | 6) => {
+    const errors: string[] = [];
+    const assignments: string[] = [];
+    const studentsToAssign = studentIds
+      .map(id => students.find(s => s.id === id))
+      .filter((s): s is Student => Boolean(s) && s.role === 'Student' && !s.roomId);
+
+    studentsToAssign.sort(sortStudentsByAdmission);
+
+    const candidateRoomsByGender = {
+      Female: rooms
+        .filter(r => isRoomAutoAssignable(r, 'Female', defaultCapacity))
+        .sort(compareRoomsForAutoAssign),
+      Male: rooms
+        .filter(r => isRoomAutoAssignable(r, 'Male', defaultCapacity))
+        .sort(compareRoomsForAutoAssign),
+    } as const;
+
+    const roomOccupancyMap = new Map<string, number>();
+    candidateRoomsByGender.Female.forEach(room => roomOccupancyMap.set(room.id, room.occupants.length));
+    candidateRoomsByGender.Male.forEach(room => roomOccupancyMap.set(room.id, room.occupants.length));
+
+    studentsToAssign.forEach(student => {
+      if (!student.admission_number && !student.studentId) {
+        errors.push(`Missing admission number or student ID for ${student.name}`);
+        return;
+      }
+      const targetRooms = candidateRoomsByGender[student.gender];
+      const room = targetRooms.find(r => (roomOccupancyMap.get(r.id) ?? r.occupants.length) < r.capacity);
+      if (!room) {
+        errors.push(`No available room for ${student.name}`);
+        return;
+      }
+      const currentOccupancy = roomOccupancyMap.get(room.id) ?? room.occupants.length;
+      const error = allocateStudent(student.id, room.blockId, room.id);
+      if (error) {
+        errors.push(`${student.name}: ${error}`);
+      } else {
+        assignments.push(student.id);
+        roomOccupancyMap.set(room.id, currentOccupancy + 1);
+      }
+    });
+
+    return { assigned: assignments, errors };
+  }, [students, rooms, blocks, allocateStudent]);
 
   const deallocateStudent = useCallback((studentId: string, role?: Role) => {
     console.log('deallocateStudent called', { studentId, role });
@@ -144,15 +561,122 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       return 'Not assigned';
     }
     const oldRoomId = student.roomId;
-    // Remove from student
     setStudents(prev => prev.map(s => s.id === studentId ? { ...s, blockId: undefined, roomId: undefined } : s));
-    // Remove from room occupants
     setRooms(prev => prev.map(r => r.id === oldRoomId ? { ...r, occupants: r.occupants.filter(o => o !== studentId) } : r));
-    // Remove allocation record
     setAllocations(prev => prev.filter(a => a.userId !== studentId));
     console.log('Deallocation successful');
     return null;
   }, [students]);
+
+  const deactivateRoom = useCallback((roomId: string, reassignBlock?: string, role?: Role) => {
+    if (role && !requireRole(role)) return { success: false, errors: ['No permission'] };
+    const room = rooms.find(r => r.id === roomId);
+    if (!room) return { success: false, errors: ['Room not found'] };
+    if (!room.active) return { success: false, errors: ['Room is already inactive'] };
+
+    const errors: string[] = [];
+    let updatedStudents = [...students];
+    let updatedRooms = [...rooms];
+    let updatedAllocations = [...allocations];
+
+    if (room.occupants.length > 0) {
+      if (!reassignBlock) {
+        return { success: false, errors: [`Cannot deactivate: ${room.occupants.length} occupant(s) need reassignment`] };
+      }
+      const targetBlock = blocks.find(b => b.id === reassignBlock);
+      if (!targetBlock || !targetBlock.active) {
+        return { success: false, errors: ['Target block not found or inactive'] };
+      }
+
+      room.occupants.forEach(studentId => {
+        const targetRoom = updatedRooms.find(r => r.blockId === reassignBlock && r.active && r.occupants.length < r.capacity);
+        if (targetRoom) {
+          updatedStudents = updatedStudents.map(s => s.id === studentId ? { ...s, blockId: reassignBlock, roomId: targetRoom.id } : s);
+          updatedRooms = updatedRooms.map(r => r.id === targetRoom.id ? { ...r, occupants: [...r.occupants, studentId] } : r);
+          updatedAllocations = updatedAllocations.map(a => a.userId === studentId ? { ...a, blockId: reassignBlock, roomId: targetRoom.id } : a);
+        } else {
+          errors.push(`No available room in target block for student ${studentId}`);
+        }
+      });
+
+      if (errors.length > 0) {
+        return { success: false, errors };
+      }
+    }
+
+    updatedRooms = updatedRooms.map(r => r.id === roomId ? { ...r, active: false } : r);
+    setStudents(updatedStudents);
+    setRooms(updatedRooms);
+    setAllocations(updatedAllocations);
+    return { success: true, errors: [] };
+  }, [students, rooms, blocks, allocations]);
+
+  const deactivateBlock = useCallback((blockId: string, reassignBlock?: string, role?: Role) => {
+    if (role && !requireRole(role)) return { success: false, errors: ['No permission'] };
+    const block = blocks.find(b => b.id === blockId);
+    if (!block) return { success: false, errors: ['Block not found'] };
+    if (!block.active) return { success: false, errors: ['Block is already inactive'] };
+
+    const blockRooms = rooms.filter(r => r.blockId === blockId);
+    const totalOccupants = blockRooms.reduce((sum, r) => sum + r.occupants.length, 0);
+
+    if (totalOccupants > 0) {
+      if (!reassignBlock) {
+        return { success: false, errors: [`Cannot deactivate: ${totalOccupants} occupant(s) need reassignment`] };
+      }
+      const targetBlock = blocks.find(b => b.id === reassignBlock);
+      if (!targetBlock || !targetBlock.active) {
+        return { success: false, errors: ['Target block not found or inactive'] };
+      }
+
+      let updatedStudents = [...students];
+      let updatedRooms = [...rooms];
+      let updatedAllocations = [...allocations];
+      const errors: string[] = [];
+
+      blockRooms.forEach(room => {
+        room.occupants.forEach(studentId => {
+          const targetRoom = updatedRooms.find(r => r.blockId === reassignBlock && r.active && r.occupants.length < r.capacity);
+          if (targetRoom) {
+            updatedStudents = updatedStudents.map(s => s.id === studentId ? { ...s, blockId: reassignBlock, roomId: targetRoom.id } : s);
+            updatedRooms = updatedRooms.map(r => r.id === targetRoom.id ? { ...r, occupants: [...r.occupants, studentId] } : r);
+            updatedAllocations = updatedAllocations.map(a => a.userId === studentId ? { ...a, blockId: reassignBlock, roomId: targetRoom.id } : a);
+          } else {
+            errors.push(`No available room for student ${studentId}`);
+          }
+        });
+      });
+
+      if (errors.length > 0) {
+        return { success: false, errors };
+      }
+
+      updatedRooms = updatedRooms.map(r => r.blockId === blockId ? { ...r, active: false } : r);
+      updatedStudents = updatedStudents.map(s => s.blockId === blockId ? { ...s, blockId: undefined, roomId: undefined } : s);
+      updatedAllocations = updatedAllocations.filter(a => a.blockId !== blockId);
+      setStudents(updatedStudents);
+      setRooms(updatedRooms);
+      setAllocations(updatedAllocations);
+      return { success: true, errors: [] };
+    }
+
+    setRooms(prev => prev.map(r => r.blockId === blockId ? { ...r, active: false } : r));
+    setBlocks(prev => prev.map(b => b.id === blockId ? { ...b, active: false } : b));
+    return { success: true, errors: [] };
+  }, [students, rooms, blocks, allocations]);
+
+  const reactivateRoom = useCallback((roomId: string, role?: Role) => {
+    if (role && !requireRole(role)) return 'No permission';
+    setRooms(prev => prev.map(r => r.id === roomId ? { ...r, active: true } : r));
+    return null;
+  }, []);
+
+  const reactivateBlock = useCallback((blockId: string, role?: Role) => {
+    if (role && !requireRole(role)) return 'No permission';
+    setRooms(prev => prev.map(r => r.blockId === blockId ? { ...r, active: true } : r));
+    setBlocks(prev => prev.map(b => b.id === blockId ? { ...b, active: true } : b));
+    return null;
+  }, []);
 
   return (
     <DataContext.Provider value={{
@@ -160,7 +684,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       addStudent, updateStudent, deleteStudent,
       addBlock, updateBlock, deleteBlock,
       addRoom, updateRoom, deleteRoom,
+      addStudents, addStudentsAndAutoAssign, bulkAssignStudents, bulkAssignToMultipleRooms, bulkAssignToBlock, autoAssignStudents,
+      deactivateRoom, deactivateBlock, reactivateRoom, reactivateBlock,
       allocateStudent, deallocateStudent,
+      ensureBlocks,
     }}>
       {children}
     </DataContext.Provider>

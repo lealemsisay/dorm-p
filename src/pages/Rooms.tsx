@@ -25,7 +25,7 @@ const Rooms = () => {
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<string | null>(null);
   const [blockForm, setBlockForm] = useState({ name: '', numberOfRooms: 3 });
-  const [roomForm, setRoomForm] = useState({ blockId: '', roomNumber: '', capacity: 2 });
+  const [roomForm, setRoomForm] = useState({ blockId: '', roomNumber: '', capacity: 2, active: true });
   const [blockSearch, setBlockSearch] = useState('');
   
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
@@ -70,7 +70,7 @@ const Rooms = () => {
     }
     setRoomModalOpen(false);
     setEditingRoom(null);
-    setRoomForm({ blockId: '', roomNumber: '', capacity: 2 });
+    setRoomForm({ blockId: '', roomNumber: '', capacity: 2, active: true });
   };
 
   const openBlockEdit = (block: Block) => {
@@ -81,7 +81,7 @@ const Rooms = () => {
 
   const openRoomEdit = (room: Room) => {
     setEditingRoom(room);
-    setRoomForm({ blockId: room.blockId, roomNumber: room.roomNumber, capacity: room.capacity });
+    setRoomForm({ blockId: room.blockId, roomNumber: room.roomNumber, capacity: room.capacity, active: room.active });
     setRoomModalOpen(true);
   };
 
@@ -223,6 +223,9 @@ const Rooms = () => {
                                 <p className="font-medium text-card-foreground">Room {r.roomNumber}</p>
                                 <p className="text-sm text-muted-foreground">{r.occupants.length} / {r.capacity} beds</p>
                               </div>
+                              <span className={`text-xs px-2 py-1 rounded-full font-medium ${r.active ? 'bg-success/10 text-success' : 'bg-slate-200 text-slate-600'}`}>
+                                {r.active ? 'Active' : 'Inactive'}
+                              </span>
                               <div className="w-24 bg-muted rounded-full h-2">
                                 <div
                                   className={`h-2 rounded-full transition-all ${isFull ? 'bg-destructive' : isEmpty ? 'bg-success' : 'bg-warning'}`}
@@ -395,6 +398,16 @@ const Rooms = () => {
             <label className="block text-sm font-medium text-card-foreground mb-1">Capacity</label>
             <input type="number" min={1} max={10} value={roomForm.capacity} onChange={e => setRoomForm(f => ({ ...f, capacity: parseInt(e.target.value) || 1 }))}
               className="w-full px-3 py-2 rounded-lg border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring" />
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              id="room-active"
+              type="checkbox"
+              checked={roomForm.active}
+              onChange={e => setRoomForm(f => ({ ...f, active: e.target.checked }))}
+              className="h-4 w-4 rounded border bg-background text-primary focus:ring-primary"
+            />
+            <label htmlFor="room-active" className="text-sm font-medium text-card-foreground">Room active</label>
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={() => { setRoomModalOpen(false); setEditingRoom(null); setRoomForm({ blockId: '', roomNumber: '', capacity: 2 }); }}

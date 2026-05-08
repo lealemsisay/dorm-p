@@ -10,8 +10,7 @@ import Rooms from "@/pages/Rooms";
 import Allocations from "@/pages/Allocations";
 import Users from "@/pages/Users";
 import Students from "@/pages/Students";
-import NotFound from "@/pages/NotFound";
-
+import NotFound from "@/pages/NotFound";import { RoleGuard } from '@/components/RoleGuard';
 const App = () => (
   <AuthProvider>
     <DataProvider>
@@ -22,10 +21,38 @@ const App = () => (
             <Route path="/login" element={<Login />} />
             <Route element={<Layout />}>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/users" element={<Users />} />
-              <Route path="/students" element={<Students />} />
-              <Route path="/blocks" element={<Rooms />} />
-              <Route path="/allocations" element={<Allocations />} />
+              <Route
+                path="/users"
+                element={
+                  <RoleGuard allowedRoles={['VicePresident']}>
+                    <Users />
+                  </RoleGuard>
+                }
+              />
+              <Route
+                path="/students"
+                element={
+                  <RoleGuard allowedRoles={['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor']}>
+                    <Students />
+                  </RoleGuard>
+                }
+              />
+              <Route
+                path="/blocks"
+                element={
+                  <RoleGuard allowedRoles={['VicePresident', 'TeamLeader', 'Coordinator']}>
+                    <Rooms />
+                  </RoleGuard>
+                }
+              />
+              <Route
+                path="/allocations"
+                element={
+                  <RoleGuard allowedRoles={['VicePresident', 'TeamLeader', 'Coordinator']}>
+                    <Allocations />
+                  </RoleGuard>
+                }
+              />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

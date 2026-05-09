@@ -11,28 +11,44 @@ import Allocations from "@/pages/Allocations";
 import Users from "@/pages/Users";
 import Students from "@/pages/Students";
 import NotFound from "@/pages/NotFound";
+import { useEffect } from "react";
+import axios from "axios";
 
-const App = () => (
-  <AuthProvider>
-    <DataProvider>
-      <TooltipProvider>
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route element={<Layout />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/users" element={<Users />} />
-              <Route path="/students" element={<Students />} />
-              <Route path="/blocks" element={<Rooms />} />
-              <Route path="/allocations" element={<Allocations />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
-    </DataProvider>
-  </AuthProvider>
-);
+const App = () => {
+  useEffect(() => {
+    const testAPI = async () => {
+      try {
+        const response = await axios.get('http://localhost:5000/api/test');
+        console.log('API Response:', response.data);
+      } catch (error) {
+        console.error('API Error:', error);
+      }
+    };
+    testAPI();
+  }, []);
+
+  return (
+    <AuthProvider>
+      <DataProvider>
+        <TooltipProvider>
+          <Sonner />
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route element={<Layout />}>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/users" element={<Users />} />
+                <Route path="/students" element={<Students />} />
+                <Route path="/blocks" element={<Rooms />} />
+                <Route path="/allocations" element={<Allocations />} />
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </TooltipProvider>
+      </DataProvider>
+    </AuthProvider>
+  );
+};
 
 export default App;

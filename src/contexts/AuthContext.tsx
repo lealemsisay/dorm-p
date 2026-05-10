@@ -34,11 +34,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const storedUsers = storage.get('users', null);
     if (storedUsers) return storedUsers;
 
-    const initialUsers = Object.entries(demoUsers).map(([username, { password, role }]) => ({
+    const initialUsers = Object.entries(demoUsers).map(([username, { password, role, studentRecordId }]) => ({
       id: username,
       username,
       role,
       password,
+      studentRecordId,
     }));
 
     storage.set('users', initialUsers);

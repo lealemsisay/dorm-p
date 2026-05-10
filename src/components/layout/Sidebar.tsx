@@ -7,8 +7,10 @@ import {
 
 const getRoleLinks = (role: Role) => {
   const baseLinks = [
-    { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor'] as Role[] },
-    { to: '/users', label: 'Users', icon: Users, roles: ['VicePresident'] as Role[] },    { to: '/students', label: 'Students', icon: Users, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor'] as Role[] },    { to: '/blocks', label: 'Blocks', icon: DoorOpen, roles: ['VicePresident', 'TeamLeader', 'Coordinator'] as Role[] },
+    { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor', 'Student'] as Role[] },
+    { to: '/users', label: 'Users', icon: Users, roles: ['VicePresident'] as Role[] },
+    { to: '/students', label: 'Students', icon: Users, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor'] as Role[] },
+    { to: '/blocks', label: 'Blocks', icon: DoorOpen, roles: ['VicePresident', 'TeamLeader', 'Coordinator'] as Role[] },
     { to: '/allocations', label: 'Allocations', icon: ArrowRightLeft, roles: ['VicePresident', 'TeamLeader', 'Coordinator'] as Role[] },
   ];
   return baseLinks.filter(link => link.roles.includes(role));

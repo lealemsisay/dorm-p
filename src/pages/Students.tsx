@@ -1,6 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import * as XLSX from 'xlsx';
 import { useData } from '@/contexts/DataContext';
+import { useAuth } from '@/auth/AuthContext';
+import { api } from '@/auth/authService';
 import { toast } from 'sonner';
 import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import DormModal from '@/components/dorm/DormModal';
@@ -80,7 +82,34 @@ const mockSaveStudent = async (payload: unknown) => {
 };
 
 const Students = () => {
-  const { students, addStudent, addStudentsAndAutoAssign, updateStudent, deleteStudent } = useData();
+  const { user } = useAuth();
+  const { addStudent, addStudentsAndAutoAssign, updateStudent, deleteStudent } = useData();
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch students from API
+  useEffect(() => {
+    const fetchStudents = async () => {
+      try {
+        const response = await api.get('/api/students');
+        if (response.data.success) {
+          // Map MongoDB _id to id for frontend compatibility
+          const mappedStudents = response.data.data.map((student: any) => ({
+            ...student,
+            id: student._id || student.id,
+          }));
+          setStudents(mappedStudents);
+        }
+      } catch (error) {
+        console.error('Failed to fetch students:', error);
+        toast.error('Failed to load students');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStudents();
+  }, []);
 
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -201,21 +230,45 @@ const Students = () => {
     };
 
     if (editing) {
-      updateStudent({ ...editing, ...studentPayload });
-      await mockSaveStudent({ ...editing, ...studentPayload });
-      toast.success('Student record updated successfully.');
+      try {
+        const response = await api.put(`/api/students/${editing._id || editing.id}`, studentPayload);
+        if (response.data.success) {
+          setStudents(prev => prev.map(s => s.id === editing.id ? { ...response.data.data, id: response.data.data._id || response.data.data.id } : s));
+          toast.success('Student record updated successfully.');
+        }
+      } catch (error) {
+        console.error('Failed to update student:', error);
+        toast.error('Failed to update student');
+      }
     } else {
-      const newStudentId = addStudent(studentPayload);
-      await mockSaveStudent({ ...studentPayload, id: newStudentId });
-      toast.success('Student registered successfully.');
+      try {
+        const response = await api.post('/api/students', studentPayload);
+        if (response.data.success) {
+          setStudents(prev => [...prev, { ...response.data.data, id: response.data.data._id || response.data.data.id }]);
+          toast.success('Student registered successfully.');
+        }
+      } catch (error) {
+        console.error('Failed to create student:', error);
+        toast.error('Failed to create student');
+      }
     }
     setModalOpen(false);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!studentToDelete) return;
-    deleteStudent(studentToDelete.id);
-    toast.success(`Deleted ${studentToDelete.name}.`);
+    
+    try {
+      const response = await api.delete(`/api/students/${studentToDelete._id || studentToDelete.id}`);
+      if (response.data.success) {
+        setStudents(prev => prev.filter(s => s.id !== studentToDelete.id));
+        toast.success(`Deleted ${studentToDelete.name}.`);
+      }
+    } catch (error) {
+      console.error('Failed to delete student:', error);
+      toast.error('Failed to delete student');
+    }
+    
     setStudentToDelete(null);
     setDeleteDialogOpen(false);
   };
@@ -372,6 +425,17 @@ const Students = () => {
       student.batch?.toLowerCase().includes(term)
     );
   });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+          <p className="text-sm text-muted-foreground">Loading students...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

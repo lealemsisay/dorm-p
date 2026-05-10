@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { authenticate, adminOrStaffOnly } = require('../middleware/authMiddleware');
 const {
     getAllStudents,
     getStudentById,
@@ -8,7 +9,8 @@ const {
     deleteStudent,
 } = require('../controllers/studentController');
 
-// Student CRUD routes
+router.use(authenticate, adminOrStaffOnly);
+
 router.get('/', getAllStudents);
 router.get('/:id', getStudentById);
 router.post('/', createStudent);

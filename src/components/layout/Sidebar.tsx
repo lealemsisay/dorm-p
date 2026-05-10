@@ -1,15 +1,20 @@
 import type { Role } from '@/types/role';
 import { NavLink, useLocation } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import {
   LayoutDashboard, Users, DoorOpen, ArrowRightLeft, LogOut, Building2, X,
 } from 'lucide-react';
 
 const getRoleLinks = (role: Role) => {
   const baseLinks = [
-    { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor'] as Role[] },
-    { to: '/users', label: 'Users', icon: Users, roles: ['VicePresident'] as Role[] },    { to: '/students', label: 'Students', icon: Users, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor'] as Role[] },    { to: '/blocks', label: 'Blocks', icon: DoorOpen, roles: ['VicePresident', 'TeamLeader', 'Coordinator'] as Role[] },
-    { to: '/allocations', label: 'Allocations', icon: ArrowRightLeft, roles: ['VicePresident', 'TeamLeader', 'Coordinator'] as Role[] },
+    { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor', 'admin', 'staff', 'Student', 'student'] as Role[] },
+    { to: '/users', label: 'Users', icon: Users, roles: ['VicePresident', 'admin'] as Role[] },
+    { to: '/students', label: 'Students', icon: Users, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor', 'admin', 'staff', 'Student', 'student'] as Role[] },
+    { to: '/blocks', label: 'Blocks', icon: DoorOpen, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'admin', 'staff'] as Role[] },
+    { to: '/allocations', label: 'Allocations', icon: ArrowRightLeft, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'admin', 'staff'] as Role[] },
+    { to: '/admin', label: 'Admin', icon: Users, roles: ['admin'] as Role[] },
+    { to: '/staff', label: 'Staff', icon: Users, roles: ['staff'] as Role[] },
+    { to: '/student', label: 'Student', icon: Users, roles: ['Student', 'student'] as Role[] },
   ];
   return baseLinks.filter(link => link.roles.includes(role));
 };

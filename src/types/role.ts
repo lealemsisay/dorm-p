@@ -3,7 +3,9 @@ export type Role =
   | 'TeamLeader' 
   | 'Coordinator' 
   | 'Proctor' 
-  | 'Student';
+  | 'Student'
+  | 'admin'
+  | 'staff';
 
 export interface User {
   id: string;

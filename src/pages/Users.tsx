@@ -1,7 +1,18 @@
 import { useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import type { CreateUserPayload } from '@/contexts/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import { RoleGuard } from '@/components/RoleGuard';
+import type { Role } from '@/types/role';
+
+type CreateUserPayload = {
+  username: string;
+  password: string;
+  role: Role;
+  fullName: string;
+  nationalId: string;
+  phoneNumber: string;
+  address: string;
+  email: string;
+};
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -184,7 +195,7 @@ const Users = () => {
     .filter(u => u.role === selectedRole);
 
   return (
-    <RoleGuard allowedRoles={['VicePresident']}>
+    <RoleGuard allowedRoles={['VicePresident', 'admin']}>
       <div className="space-y-6">
 
         {/* HEADER */}

@@ -1,5 +1,5 @@
 import { Menu, Bell } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 
 interface NavbarProps {
   onMenuClick: () => void;

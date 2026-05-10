@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, useLocation, Navigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import Sidebar from './Sidebar';
 import Navbar from './Navbar';
 import { RoleGuard } from '../RoleGuard';

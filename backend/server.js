@@ -1,5 +1,8 @@
+console.log("🚀 Server file is running...");
+require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
+const connectDB = require('./config/db');
 
 const app = express();
 
@@ -10,14 +13,23 @@ app.get("/", (req, res) => {
     res.send("Dormitory Backend Running");
 });
 
-// Import routes
+// routes
 const testRoutes = require('./routes/testRoutes');
+const studentRoutes = require('./routes/studentRoutes');
 
-// Use routes with /api prefix
-app.use('/api', testRoutes);
+app.use('/api/test', testRoutes);
+app.use('/api/students', studentRoutes);
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+(async () => {
+    try {
+        await connectDB();
+        app.listen(PORT, () => {
+            console.log(`Server running on port ${PORT}`);
+        });
+    } catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
+    }
+})();

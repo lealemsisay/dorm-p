@@ -7,6 +7,7 @@ import {
 
 const getRoleLinks = (role: Role) => {
   const baseLinks = [
+<<<<<<< HEAD
     { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor', 'admin', 'staff', 'Student', 'student'] as Role[] },
     { to: '/users', label: 'Users', icon: Users, roles: ['VicePresident', 'admin'] as Role[] },
     { to: '/students', label: 'Students', icon: Users, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor', 'admin', 'staff', 'Student', 'student'] as Role[] },
@@ -15,6 +16,13 @@ const getRoleLinks = (role: Role) => {
     { to: '/admin', label: 'Admin', icon: Users, roles: ['admin'] as Role[] },
     { to: '/staff', label: 'Staff', icon: Users, roles: ['staff'] as Role[] },
     { to: '/student', label: 'Student', icon: Users, roles: ['Student', 'student'] as Role[] },
+=======
+    { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor', 'Student'] as Role[] },
+    { to: '/users', label: 'Users', icon: Users, roles: ['VicePresident'] as Role[] },
+    { to: '/students', label: 'Students', icon: Users, roles: ['VicePresident', 'TeamLeader', 'Coordinator', 'Proctor'] as Role[] },
+    { to: '/blocks', label: 'Blocks', icon: DoorOpen, roles: ['VicePresident', 'TeamLeader', 'Coordinator'] as Role[] },
+    { to: '/allocations', label: 'Allocations', icon: ArrowRightLeft, roles: ['VicePresident', 'TeamLeader', 'Coordinator'] as Role[] },
+>>>>>>> f9624a099bd7184f2cbf42810d1211d4866e6b7b
   ];
   return baseLinks.filter(link => link.roles.includes(role));
 };

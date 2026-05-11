@@ -2,57 +2,61 @@ const mongoose = require('mongoose');
 
 const studentSchema = new mongoose.Schema(
     {
-        registrarId: {
+        name: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        studentId: {
             type: String,
             required: true,
             unique: true,
             trim: true,
         },
-        firstName: {
+        admission_number: {
+            type: String,
+            trim: true,
+        },
+        registrar_id: {
+            type: String,
+            trim: true,
+        },
+        department: {
             type: String,
             required: true,
             trim: true,
         },
-        lastName: {
-            type: String,
-            required: true,
-            trim: true,
-        },
-        email: {
-            type: String,
-            required: true,
-            unique: true,
-            trim: true,
-            lowercase: true,
-        },
-        phoneNumber: {
+        year: {
             type: String,
             required: true,
         },
-        admissionNumber: {
+        phone: {
             type: String,
             required: true,
-            unique: true,
-        },
-        dateOfBirth: {
-            type: Date,
         },
         gender: {
             type: String,
-            enum: ['Male', 'Female', 'Other'],
-        },
-        program: {
-            type: String,
+            enum: ['Male', 'Female'],
             required: true,
         },
-        year: {
-            type: Number,
+        category: {
+            type: String,
+            enum: ['Freshman', 'Senior', 'Remedial', 'GC'],
             required: true,
         },
-        status: {
+        batch: {
             type: String,
-            enum: ['Active', 'Inactive', 'Graduated'],
-            default: 'Active',
+            trim: true,
+        },
+        role: {
+            type: String,
+            default: 'Student',
+        },
+        blockId: {
+            type: String,
+        },
+        roomId: {
+            type: String,
         },
     },
     { timestamps: true }

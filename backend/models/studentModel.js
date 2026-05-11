@@ -2,22 +2,23 @@ const mongoose = require('mongoose');
 
 const studentSchema = new mongoose.Schema(
   {
-    fullName: {
+    name: {
       type: String,
       required: true,
       trim: true,
     },
-    admissionNumber: {
+    studentId: {
       type: String,
       required: true,
       unique: true,
       trim: true,
     },
-    gender: {
+    admission_number: {
       type: String,
-      required: true,
-      enum: ['male', 'female'],
-      lowercase: true,
+      trim: true,
+    },
+    registrar_id: {
+      type: String,
       trim: true,
     },
     department: {
@@ -25,31 +26,37 @@ const studentSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
-    phoneNumber: {
+    year: {
       type: String,
       required: true,
+    },
+    phone: {
+      type: String,
+      required: true,
+    },
+    gender: {
+      type: String,
+      enum: ['Male', 'Female'],
+      required: true,
+    },
+    category: {
+      type: String,
+      enum: ['Freshman', 'Senior', 'Remedial', 'GC'],
+      required: true,
+    },
+    batch: {
+      type: String,
       trim: true,
-      validate: {
-        validator: function (value) {
-          return /^\+251\d{9}$/.test(value);
-        },
-        message: 'Phone number must start with +251 and include 9 digits after country code.',
-      },
     },
     role: {
       type: String,
-      default: 'student',
-      enum: ['student'],
+      default: 'Student',
     },
-    assignedBlock: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Block',
-      default: null,
+    blockId: {
+      type: String,
     },
-    assignedRoom: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Room',
-      default: null,
+    roomId: {
+      type: String,
     },
   },
   {

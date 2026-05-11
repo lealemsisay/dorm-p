@@ -20,7 +20,8 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status;
-    if (status === 401 || status === 403) {
+    const skipRedirect = error?.config?.skipAuthRedirect;
+    if ((status === 401 || status === 403) && !skipRedirect) {
       storage.remove('token');
       storage.remove('user');
       window.location.href = '/login';

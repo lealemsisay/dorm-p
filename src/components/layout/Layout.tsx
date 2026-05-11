@@ -11,6 +11,9 @@ const titles: Record<string, string> = {
   '/students': 'Student Management',
   '/blocks': 'Block Management',
   '/allocations': 'Allocations',
+  '/admin': 'Admin Dashboard',
+  '/staff': 'Staff Dashboard',
+  '/student': 'Student Dashboard',
 };
 
 const Layout = () => {
@@ -23,9 +26,9 @@ const Layout = () => {
   const title = titles[location.pathname] || 'DormManager';
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background lg:flex">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="lg:ml-64 flex flex-col min-h-screen">
+      <div className="flex-1 min-h-screen">
         <Navbar onMenuClick={() => setSidebarOpen(true)} title={title} />
         <main className="flex-1 p-4 lg:p-6">
           <Outlet />

@@ -238,7 +238,29 @@ const changePassword = async (req, res) => {
   }
 };
 
+const getCurrentUser = async (req, res) => {
+  try {
+    const user = req.user;
+    res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          id: user.id,
+          username: user.id,
+          role: user.role,
+        },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   login,
   changePassword,
+  getCurrentUser,
 };

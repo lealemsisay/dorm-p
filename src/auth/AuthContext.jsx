@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from './authService';
 import { storage } from '@/utils/storage';
 import { demoUsers } from '@/types/role';
@@ -27,6 +27,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(initialUser);
   const [token, setToken] = useState(initialToken);
   const [users, setUsers] = useState(buildInitialUsers);
+  const [authReady, setAuthReady] = useState(false);
 
   const isAuthenticated = Boolean(user && token);
   const role = user?.role || null;
@@ -42,6 +43,35 @@ export const AuthProvider = ({ children }) => {
     storage.remove('token');
     storage.remove('user');
   }, []);
+
+  const initializeAuth = useCallback(async () => {
+    if (!initialToken) {
+      setAuthReady(true);
+      return;
+    }
+
+    try {
+      const response = await api.get('/api/auth/me', { skipAuthRedirect: true });
+      const currentUser = response.data?.data?.user;
+      if (currentUser) {
+        const sessionUser = {
+          id: currentUser.id,
+          username: currentUser.username,
+          role: currentUser.role,
+        };
+        setUser(sessionUser);
+        setToken(initialToken);
+        storage.set('token', initialToken);
+        storage.set('user', sessionUser);
+      } else {
+        logout();
+      }
+    } catch (error) {
+      logout();
+    } finally {
+      setAuthReady(true);
+    }
+  }, [initialToken, logout]);
 
   const login = useCallback(async (id, password) => {
     const response = await api.post('/api/auth/login', { id, password });
@@ -118,6 +148,7 @@ export const AuthProvider = ({ children }) => {
     token,
     role,
     isAuthenticated,
+    authReady,
     login,
     logout,
     changePassword,
@@ -125,7 +156,11 @@ export const AuthProvider = ({ children }) => {
     createUser,
     updateUser,
     deleteUser,
-  }), [user, token, role, isAuthenticated, login, logout, changePassword, users, createUser, updateUser, deleteUser]);
+  }), [user, token, role, isAuthenticated, authReady, login, logout, changePassword, users, createUser, updateUser, deleteUser]);
+
+  useEffect(() => {
+    initializeAuth();
+  }, [initializeAuth]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

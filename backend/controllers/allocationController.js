@@ -75,6 +75,18 @@ const assignStudent = async (req, res) => {
   }
 };
 
+const getAllAllocations = async (req, res) => {
+  try {
+    const allocations = await Allocation.find().lean();
+    res.json({
+      success: true,
+      data: allocations,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 const reassignStudent = async (req, res) => {
   try {
     const { studentId, roomId } = req.body;
@@ -207,4 +219,5 @@ module.exports = {
   assignStudent,
   reassignStudent,
   removeStudentAssignment,
+  getAllAllocations,
 };
